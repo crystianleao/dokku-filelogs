@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+
+APP="${1:-}"
+[[ -z "$APP" ]] && exit 0
+
+# Refuse to remove anything outside our log root.
+case "$FILELOGS_LOG_ROOT/$APP" in
+  /var/log/dokku/apps/*|"$FILELOGS_LOG_ROOT"/*)
+    rm -rf "${FILELOGS_LOG_ROOT:?}/$APP"
+    rm -rf "${FILELOGS_CONFIG_ROOT:?}/apps/$APP"
+    ;;
+esac

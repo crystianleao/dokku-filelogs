@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+APP="${1:-}"
+[[ -z "$APP" ]] && exit 0
+
+auto=$(filelogs_get_value --global auto-enable)
+if [[ "$auto" == "true" ]]; then
+  "$PLUGIN_ROOT/subcommands/enable" "$APP" || true
+fi

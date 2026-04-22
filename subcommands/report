@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+report_app() {
+  local app="$1"
+  local log_dir="$FILELOGS_LOG_ROOT/$app"
+  local enabled="no"
+  filelogs_app_is_enabled "$app" && enabled="yes"
+
+  local used_bytes used_human
+  used_bytes=$(filelogs_dir_bytes "$log_dir")
+  used_human=$(filelogs_bytes_to_human "$used_bytes")
+
+  local max_app
+  max_app=$(filelogs_get_value "$app" max-app-bytes)
+
+  local retention
+  retention=$(filelogs_get_value "$app" retention-days)
+
+  local format
+  format=$(filelogs_get_value "$app" format)
+
+  local compress
+  compress=$(filelogs_get_value "$app" compress)
+
+  cat <<EOF
+=====> $app filelogs information
+       enabled:          $enabled
+       log dir:          $log_dir
+       disk used:        $used_human
+       retention-days:   $retention
+       max-app-bytes:    $max_app
+       format:           $format
+       compress:         $compress
+EOF
+}
+
+report_global() {
+  local total total_human max_total
+  total=$(filelogs_dir_bytes "$FILELOGS_LOG_ROOT")
+  total_human=$(filelogs_bytes_to_human "$total")
+  max_total=$(filelogs_get_value --global max-total-bytes)
+  cat <<EOF
+=====> filelogs global report
+       log root:         $FILELOGS_LOG_ROOT
+       disk used (all):  $total_human
+       max-total-bytes:  $max_total
+       retention-days:   $(filelogs_get_value --global retention-days)
+       max-app-bytes:    $(filelogs_get_value --global max-app-bytes)
+       format:           $(filelogs_get_value --global format)
+       compress:         $(filelogs_get_value --global compress)
+       auto-enable:      $(filelogs_get_value --global auto-enable)
+EOF
+}
+
+cmd_report() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:report"
+  [[ "${1:-}" == "$cmd" ]] && shift
+  local app="${1:-}"
+
+  if [[ -n "$app" ]]; then
+    report_app "$app"
+    return
+  fi
+
+  report_global
+  local a
+  while IFS= read -r a; do
+    [[ -n "$a" ]] && report_app "$a"
+  done < <(filelogs_list_apps)
+}
+
+cmd_report "$@"

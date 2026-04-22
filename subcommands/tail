@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_tail() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:tail"
+  [[ "${1:-}" == "$cmd" ]] && shift
+
+  local app="" date_arg="" lines=100 follow=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --date)
+        date_arg="${2:-}"; shift 2 ;;
+      --date=*)
+        date_arg="${1#*=}"; shift ;;
+      --lines|-n)
+        lines="${2:-100}"; shift 2 ;;
+      --lines=*)
+        lines="${1#*=}"; shift ;;
+      --follow|-f)
+        follow=1; shift ;;
+      -*)
+        echo "unknown flag: $1" >&2; exit 1 ;;
+      *)
+        if [[ -z "$app" ]]; then
+          app="$1"
+        else
+          echo "unexpected arg: $1" >&2
+          exit 1
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$app" ]]; then
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--lines N] [--follow]" >&2
+    exit 1
+  fi
+
+  local date_val="${date_arg:-$(filelogs_today)}"
+  local file="$FILELOGS_LOG_ROOT/$app/$date_val.log"
+  local gz="$file.gz"
+
+  if [[ -f "$file" ]]; then
+    if (( follow == 1 )); then
+      tail -n "$lines" -F "$file"
+    else
+      tail -n "$lines" "$file"
+    fi
+  elif [[ -f "$gz" ]]; then
+    gunzip -c "$gz" | tail -n "$lines"
+  else
+    echo "no logs for $app on $date_val" >&2
+    exit 1
+  fi
+}
+
+cmd_tail "$@"

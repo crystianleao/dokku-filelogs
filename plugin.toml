@@ -1,0 +1,4 @@
+[plugin]
+description = "Persist Dokku app logs to daily-rotated files with disk caps"
+version = "0.1.0"
+[plugin.config]

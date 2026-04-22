@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+OLD="${1:-}"
+NEW="${2:-}"
+[[ -z "$OLD" || -z "$NEW" ]] && exit 0
+
+# Move log dir
+if [[ -d "$FILELOGS_LOG_ROOT/$OLD" ]]; then
+  mv "$FILELOGS_LOG_ROOT/$OLD" "$FILELOGS_LOG_ROOT/$NEW"
+fi
+
+# Move config dir
+if [[ -d "$FILELOGS_CONFIG_ROOT/apps/$OLD" ]]; then
+  mv "$FILELOGS_CONFIG_ROOT/apps/$OLD" "$FILELOGS_CONFIG_ROOT/apps/$NEW"
+fi
+
+# Re-enable so Vector sink points at new path.
+if filelogs_app_is_enabled "$NEW"; then
+  "$PLUGIN_ROOT/subcommands/enable" "$NEW" || true
+fi

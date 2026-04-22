@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Shared helpers. Sourced by subcommands, triggers, gc.sh, tests.
+# Safe to source multiple times.
+
+set -eo pipefail
+
+filelogs_today() { date -u +%Y-%m-%d; }
+
+filelogs_is_valid_key() {
+  local key="$1" k
+  for k in $FILELOGS_VALID_KEYS; do
+    [[ "$k" == "$key" ]] && return 0
+  done
+  return 1
+}
+
+filelogs_is_global_only_key() {
+  local key="$1" k
+  for k in $FILELOGS_GLOBAL_ONLY_KEYS; do
+    [[ "$k" == "$key" ]] && return 0
+  done
+  return 1
+}
+
+filelogs_validate_value() {
+  local key="$1" val="$2"
+  case "$key" in
+    retention-days)
+      [[ "$val" =~ ^[0-9]+$ ]] || { echo "retention-days must be integer" >&2; return 1; }
+      ;;
+    max-app-bytes | max-total-bytes)
+      [[ "$val" =~ ^[0-9]+[KkMmGg]?$ ]] || { echo "$key must be bytes or N[K|M|G]" >&2; return 1; }
+      ;;
+    format)
+      [[ "$val" == "json" || "$val" == "text" ]] || { echo "format must be json|text" >&2; return 1; }
+      ;;
+    compress | auto-enable)
+      [[ "$val" == "true" || "$val" == "false" ]] || { echo "$key must be true|false" >&2; return 1; }
+      ;;
+    *)
+      echo "unknown key: $key" >&2
+      return 1
+      ;;
+  esac
+}
+
+filelogs_config_path() {
+  local scope="$1" key="$2"
+  if [[ "$scope" == "--global" ]]; then
+    echo "$FILELOGS_CONFIG_ROOT/$key"
+  else
+    echo "$FILELOGS_CONFIG_ROOT/apps/$scope/$key"
+  fi
+}
+
+filelogs_get_raw() {
+  local scope="$1" key="$2"
+  local path
+  path=$(filelogs_config_path "$scope" "$key")
+  [[ -f "$path" ]] && cat "$path"
+}
+
+filelogs_get_value() {
+  # effective value: per-app overrides global; falls back to default
+  local app="$1" key="$2"
+  local val
+  if [[ "$app" != "--global" ]]; then
+    val=$(filelogs_get_raw "$app" "$key")
+    [[ -n "$val" ]] && { echo "$val"; return; }
+  fi
+  val=$(filelogs_get_raw --global "$key")
+  if [[ -n "$val" ]]; then echo "$val"; return; fi
+  case "$key" in
+    retention-days)   echo "$FILELOGS_DEFAULT_RETENTION_DAYS" ;;
+    max-app-bytes)    echo "$FILELOGS_DEFAULT_MAX_APP_BYTES" ;;
+    max-total-bytes)  echo "$FILELOGS_DEFAULT_MAX_TOTAL_BYTES" ;;
+    format)           echo "$FILELOGS_DEFAULT_FORMAT" ;;
+    compress)         echo "$FILELOGS_DEFAULT_COMPRESS" ;;
+    auto-enable)      echo "false" ;;
+    *)                echo "" ;;
+  esac
+}
+
+filelogs_set_value() {
+  local scope="$1" key="$2" val="$3"
+  local dir
+  if [[ "$scope" == "--global" ]]; then
+    dir="$FILELOGS_CONFIG_ROOT"
+  else
+    dir="$FILELOGS_CONFIG_ROOT/apps/$scope"
+  fi
+  mkdir -p "$dir"
+  printf '%s' "$val" > "$dir/$key"
+}
+
+filelogs_human_to_bytes() {
+  local v="$1"
+  case "$v" in
+    *G|*g) echo $(( ${v%[Gg]} * 1024 * 1024 * 1024 )) ;;
+    *M|*m) echo $(( ${v%[Mm]} * 1024 * 1024 )) ;;
+    *K|*k) echo $(( ${v%[Kk]} * 1024 )) ;;
+    *)     echo "$v" ;;
+  esac
+}
+
+filelogs_bytes_to_human() {
+  local b="$1"
+  if   (( b >= 1073741824 )); then printf '%.2fG\n' "$(awk "BEGIN{print $b/1073741824}")"
+  elif (( b >= 1048576   )); then printf '%.2fM\n' "$(awk "BEGIN{print $b/1048576}")"
+  elif (( b >= 1024      )); then printf '%.2fK\n' "$(awk "BEGIN{print $b/1024}")"
+  else                             printf '%dB\n' "$b"
+  fi
+}
+
+filelogs_dir_bytes() {
+  local d="$1"
+  [[ -d "$d" ]] || { echo 0; return; }
+  # GNU du: -sb. BSD du lacks -b; prefer -sk*1024 fallback.
+  if du -sb "$d" >/dev/null 2>&1; then
+    du -sb "$d" | cut -f1
+  else
+    local kb
+    kb=$(du -sk "$d" | cut -f1)
+    echo $(( kb * 1024 ))
+  fi
+}
+
+filelogs_app_is_enabled() {
+  local app="$1"
+  [[ -f "$FILELOGS_CONFIG_ROOT/apps/$app/enabled" ]]
+}
+
+filelogs_build_sink_dsn() {
+  local app="$1" format
+  format=$(filelogs_get_value "$app" format)
+  printf 'file://%s/%s/%%Y-%%m-%%d.log?encoding[codec]=%s' \
+    "$FILELOGS_LOG_ROOT" "$app" "$format"
+}
+
+filelogs_mtime() {
+  # Portable mtime-as-epoch. GNU stat -c, BSD stat -f.
+  local f="$1"
+  if stat -c %Y "$f" >/dev/null 2>&1; then
+    stat -c %Y "$f"
+  else
+    stat -f %m "$f"
+  fi
+}
+
+filelogs_oldest_file() {
+  # Usage: filelogs_oldest_file <dir> [find-args...]
+  # Emits path of oldest matching file, or nothing if none.
+  local dir="$1"; shift
+  [[ -d "$dir" ]] || return 0
+
+  local f mtime best_mtime="" best=""
+  while IFS= read -r -d '' f; do
+    mtime=$(filelogs_mtime "$f")
+    if [[ -z "$best_mtime" ]] || (( mtime < best_mtime )); then
+      best_mtime="$mtime"
+      best="$f"
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f "$@" -print0 2>/dev/null)
+  [[ -n "$best" ]] && echo "$best"
+}
+
+filelogs_oldest_file_recursive() {
+  # Recursive variant (for global cap scan).
+  local dir="$1"; shift
+  [[ -d "$dir" ]] || return 0
+
+  local f mtime best_mtime="" best=""
+  while IFS= read -r -d '' f; do
+    mtime=$(filelogs_mtime "$f")
+    if [[ -z "$best_mtime" ]] || (( mtime < best_mtime )); then
+      best_mtime="$mtime"
+      best="$f"
+    fi
+  done < <(find "$dir" -mindepth 2 -type f "$@" -print0 2>/dev/null)
+  [[ -n "$best" ]] && echo "$best"
+}
+
+filelogs_list_apps() {
+  local d="$FILELOGS_CONFIG_ROOT/apps"
+  [[ -d "$d" ]] || return 0
+  local app
+  for app in "$d"/*/; do
+    [[ -d "$app" ]] || continue
+    basename "$app"
+  done
+}

@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:dokku.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(chmod +x commands install uninstall post-app-create post-delete post-app-rename subcommands/* gc/gc.sh tests/setup.sh)",
+      "Bash(bats --version)",
+      "Bash(bash --version)",
+      "Bash(brew install *)",
+      "Bash(make lint *)",
+      "Bash(make unit-tests *)",
+      "Bash(make test *)",
+      "Bash(/bin/bash *)"
+    ]
+  }
+}

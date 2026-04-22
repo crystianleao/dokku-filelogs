@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Defaults. Any var may be overridden via environment before invocation.
+
+export PLUGIN_COMMAND_PREFIX="${PLUGIN_COMMAND_PREFIX:-filelogs}"
+export PLUGIN_SERVICE="${PLUGIN_SERVICE:-filelogs}"
+
+export FILELOGS_LOG_ROOT="${FILELOGS_LOG_ROOT:-/var/log/dokku/apps}"
+export FILELOGS_CONFIG_ROOT="${FILELOGS_CONFIG_ROOT:-/var/lib/dokku/services/filelogs}"
+
+export FILELOGS_DEFAULT_RETENTION_DAYS="${FILELOGS_DEFAULT_RETENTION_DAYS:-14}"
+export FILELOGS_DEFAULT_MAX_APP_BYTES="${FILELOGS_DEFAULT_MAX_APP_BYTES:-1G}"
+export FILELOGS_DEFAULT_MAX_TOTAL_BYTES="${FILELOGS_DEFAULT_MAX_TOTAL_BYTES:-10G}"
+export FILELOGS_DEFAULT_FORMAT="${FILELOGS_DEFAULT_FORMAT:-json}"
+export FILELOGS_DEFAULT_COMPRESS="${FILELOGS_DEFAULT_COMPRESS:-true}"
+
+# NB: space-separated strings (not bash arrays) so they survive being sourced
+# inside a function in bash 3.2 (macOS dev) — a known bash 3.2 scoping bug.
+export FILELOGS_VALID_KEYS="retention-days max-app-bytes max-total-bytes format compress auto-enable"
+export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable"

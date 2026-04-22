@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+
+case "$1" in
+  help | "${PLUGIN_COMMAND_PREFIX}:help")
+    cat <<EOF
+    ${PLUGIN_COMMAND_PREFIX}:enable <app>                 Enable file logging for app
+    ${PLUGIN_COMMAND_PREFIX}:disable <app>                Disable file logging for app
+    ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable)
+    ${PLUGIN_COMMAND_PREFIX}:report [<app>]               Show status + disk usage
+    ${PLUGIN_COMMAND_PREFIX}:gc                           Force a garbage-collection run
+    ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--lines N]  Tail daily log
+EOF
+    ;;
+  *)
+    exit "$DOKKU_NOT_IMPLEMENTED_EXIT"
+    ;;
+esac

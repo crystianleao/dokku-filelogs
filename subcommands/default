@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+
+cat <<EOF
+${PLUGIN_COMMAND_PREFIX} — persist Dokku app logs to daily files with disk caps.
+
+Subcommands:
+  ${PLUGIN_COMMAND_PREFIX}:enable <app>
+  ${PLUGIN_COMMAND_PREFIX}:disable <app>
+  ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <key> <value>
+  ${PLUGIN_COMMAND_PREFIX}:report [<app>]
+  ${PLUGIN_COMMAND_PREFIX}:gc
+  ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--lines N]
+
+Keys: retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable
+EOF

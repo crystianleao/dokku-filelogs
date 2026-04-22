@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_enable() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:enable"
+  [[ "${1:-}" == "$cmd" ]] && shift
+  local app="${1:-}"
+
+  if [[ -z "$app" ]]; then
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:enable <app>" >&2
+    exit 1
+  fi
+
+  local log_dir="$FILELOGS_LOG_ROOT/$app"
+  mkdir -p "$log_dir"
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/$app"
+
+  local dsn
+  dsn=$(filelogs_build_sink_dsn "$app")
+
+  dokku logs:set "$app" vector-sink "$dsn"
+
+  printf '1' > "$FILELOGS_CONFIG_ROOT/apps/$app/enabled"
+  echo "-----> filelogs enabled for $app (sink: $dsn)"
+}
+
+cmd_enable "$@"

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_set() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:set"
+  [[ "${1:-}" == "$cmd" ]] && shift
+
+  local scope="${1:-}" key="${2:-}" val="${3:-}"
+
+  if [[ -z "$scope" || -z "$key" || -z "$val" ]]; then
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <key> <value>" >&2
+    exit 1
+  fi
+
+  if ! filelogs_is_valid_key "$key"; then
+    echo "invalid key: $key" >&2
+    echo "valid keys: $FILELOGS_VALID_KEYS" >&2
+    exit 1
+  fi
+
+  if filelogs_is_global_only_key "$key" && [[ "$scope" != "--global" ]]; then
+    echo "key '$key' may only be set with --global" >&2
+    exit 1
+  fi
+
+  filelogs_validate_value "$key" "$val"
+  filelogs_set_value "$scope" "$key" "$val"
+
+  echo "-----> $scope: $key=$val"
+}
+
+cmd_set "$@"

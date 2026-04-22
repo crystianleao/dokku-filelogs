@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_disable() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:disable"
+  [[ "${1:-}" == "$cmd" ]] && shift
+  local app="${1:-}"
+
+  if [[ -z "$app" ]]; then
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:disable <app>" >&2
+    exit 1
+  fi
+
+  # Reset sink to default (Vector off). Use unset; fall back to set "" if unset unsupported.
+  if ! dokku logs:unset "$app" vector-sink 2>/dev/null; then
+    dokku logs:set "$app" vector-sink ""
+  fi
+
+  rm -f "$FILELOGS_CONFIG_ROOT/apps/$app/enabled"
+  echo "-----> filelogs disabled for $app (files kept at $FILELOGS_LOG_ROOT/$app)"
+}
+
+cmd_disable "$@"

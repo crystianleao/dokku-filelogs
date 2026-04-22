@@ -1,0 +1,11 @@
+[Unit]
+Description=Dokku filelogs garbage collection
+After=network.target
+
+[Service]
+Type=oneshot
+User=__OWNER__
+Group=__GROUP__
+ExecStart=__PLUGIN_ROOT__/gc/gc.sh
+Nice=10
+IOSchedulingClass=idle

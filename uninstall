@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now dokku-filelogs.timer 2>/dev/null || true
+  rm -f /etc/systemd/system/dokku-filelogs.timer
+  rm -f /etc/systemd/system/dokku-filelogs.service
+  systemctl daemon-reload || true
+fi
+
+echo "-----> filelogs uninstalled (log files under /var/log/dokku/apps left intact)"
