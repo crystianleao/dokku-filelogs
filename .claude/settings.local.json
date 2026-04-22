@@ -20,7 +20,12 @@
       "Bash(echo \"EXIT=$?\")",
       "Bash(export FILELOGS_LOG_ROOT=/tmp/flogs-test FILELOGS_CONFIG_ROOT=/tmp/flogs-config DOKKU_TRACE=1)",
       "Bash(curl -sL https://raw.githubusercontent.com/dokku/dokku-postgres/master/LICENSE.md)",
-      "Bash(curl -sL https://raw.githubusercontent.com/dokku/dokku-postgres/master/__TRACKED_VAR__)"
+      "Bash(curl -sL https://raw.githubusercontent.com/dokku/dokku-postgres/master/__TRACKED_VAR__)",
+      "Bash(chmod +x *)",
+      "Bash(bats tests/backup.bats)",
+      "Bash(/Users/crystianleao/Desktop/RDMAPPS/EU/text-logs/subcommands/backup myapp *)",
+      "Bash(rm -rf /tmp/flog-manual-test)",
+      "Bash(mkdir -p /tmp/flog-manual-test/logs /tmp/flog-manual-test/config/apps)"
     ]
   }
 }

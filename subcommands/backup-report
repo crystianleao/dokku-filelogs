@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup_report() {
+  local auth="no"
+  filelogs_backup_auth_exists && auth="yes"
+
+  local aws_present="no"
+  command -v aws >/dev/null 2>&1 && aws_present="yes"
+
+  local region endpoint bucket prefix schedule last_run last_human candidates
+  region=$(filelogs_backup_cred_get AWS_DEFAULT_REGION)
+  endpoint=$(filelogs_backup_cred_get FILELOGS_S3_ENDPOINT)
+  bucket=$(filelogs_backup_get bucket)
+  prefix=$(filelogs_backup_get prefix)
+  schedule=$(filelogs_backup_get schedule)
+  last_run=$(filelogs_backup_get last-run)
+
+  if [[ -n "$last_run" ]]; then
+    last_human=$(date -u -r "$last_run" 2>/dev/null \
+                || date -u -d "@$last_run" 2>/dev/null \
+                || echo "$last_run")
+  else
+    last_human="never"
+  fi
+
+  candidates=$(filelogs_list_backup_candidates | wc -l | tr -d ' ')
+
+  cat <<EOF
+=====> filelogs backup report
+       aws cli present:  $aws_present
+       credentials:      $auth
+       region:           ${region:-<unset>}
+       endpoint:         ${endpoint:-<default AWS>}
+       bucket:           ${bucket:-<unset>}
+       prefix:           ${prefix:-<none>}
+       schedule (cron):  ${schedule:-<none>}
+       cron file:        $FILELOGS_CRON_FILE $( [[ -f "$FILELOGS_CRON_FILE" ]] && echo "(present)" || echo "(absent)" )
+       last run:         $last_human
+       candidate apps:   $candidates
+EOF
+}
+
+cmd_backup_report "$@"

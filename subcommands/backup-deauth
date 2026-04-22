@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup_deauth() {
+  local f
+  f="$(filelogs_backup_dir)/credentials"
+  if [[ -f "$f" ]]; then
+    rm -f "$f"
+    echo "-----> backup credentials removed"
+  else
+    echo "-----> no credentials to remove"
+  fi
+}
+
+cmd_backup_deauth "$@"

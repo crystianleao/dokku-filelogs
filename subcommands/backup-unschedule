@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup_unschedule() {
+  if [[ -f "$FILELOGS_CRON_FILE" ]]; then
+    rm -f "$FILELOGS_CRON_FILE"
+    echo "-----> schedule removed: $FILELOGS_CRON_FILE"
+  else
+    echo "-----> no schedule to remove"
+  fi
+
+  rm -f "$(filelogs_backup_dir)/schedule"
+}
+
+cmd_backup_unschedule "$@"

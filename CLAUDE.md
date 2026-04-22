@@ -127,6 +127,43 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
   Vector picks up the new DSN. Global rotation changes only affect
   newly-enabled apps; the set subcommand prints an advisory.
 
+### S3 backup
+
+- Auth is **global**, not per-app. One set of credentials per plugin
+  install. Lives at `$FILELOGS_CONFIG_ROOT/backup/credentials`,
+  mode `0600`, key=value format (sourceable via `set -a; source ...`).
+- Keys: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `AWS_DEFAULT_REGION`, `FILELOGS_S3_ENDPOINT` (empty for default AWS).
+- Bucket / prefix / schedule live next to credentials as plain files:
+  `backup/bucket`, `backup/prefix`, `backup/schedule`, `backup/last-run`.
+- `backup` uses `aws s3 sync` with `--exclude "*" --include "*.log.gz"`,
+  so the currently-open `.log` (mutable, being written by Vector) is
+  never uploaded mid-write. Only rotated files reach S3.
+- Sync is idempotent: re-running the same `backup` call is a no-op if
+  nothing changed on disk. `aws s3 sync` handles dedup via size/etag.
+- Scheduling writes a plain cron file to `$FILELOGS_CRON_FILE`
+  (default `/etc/cron.d/dokku-filelogs-backup`, overridable for tests).
+  The file runs `dokku filelogs:backup --all` as user `dokku`.
+- Per-app opt-out: `dokku filelogs:set <app> backup-exclude true`.
+  `filelogs_list_backup_candidates` filters these out.
+- **Backup is best-effort, not required for retention.** The GC deletes
+  by retention/cap regardless of backup status. Users who need
+  guaranteed archival should schedule backup more frequently than
+  retention (e.g., backup daily, retention=14d).
+- Tests stub the `aws` binary on PATH like the `dokku` stub. See
+  `test_helper.bash:assert_aws_called_with`.
+
+### Return-0 invariant for getter helpers
+
+Any helper that does `cat $possibly_missing_file` MUST end with
+`return 0` (or wrap the cat in `if [[ -f ]]`). If it leaks a non-zero
+return, subcommands that do `x=$(helper ...)` under `set -eo pipefail`
+die silently. Bats' `run` disables errexit, so unit tests on the helper
+itself will *not* catch the bug — it only shows up when the helper is
+called from a subcommand body. `filelogs_get_raw`, `filelogs_backup_get`,
+and `filelogs_backup_cred_get` all follow this invariant. New getters
+must too.
+
 ### Disk-pressure watchdog
 
 - `gc_disk_pressure` runs **after** `gc_app` and `gc_global`, so normal

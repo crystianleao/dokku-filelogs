@@ -9,6 +9,9 @@ SCRIPTS := \
   post-app-create post-delete post-app-rename \
   subcommands/default subcommands/enable subcommands/disable \
   subcommands/set subcommands/report subcommands/gc subcommands/tail \
+  subcommands/backup subcommands/backup-auth subcommands/backup-deauth \
+  subcommands/backup-schedule subcommands/backup-unschedule \
+  subcommands/backup-report \
   gc/gc.sh
 
 test: lint unit-tests

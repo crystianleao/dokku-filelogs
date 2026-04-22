@@ -12,9 +12,14 @@ GROUP="${FILELOGS_GROUP:-dokku}"
 install -d -m 0755 "$FILELOGS_LOG_ROOT"
 install -d -m 0755 "$FILELOGS_CONFIG_ROOT"
 install -d -m 0755 "$FILELOGS_CONFIG_ROOT/apps"
+install -d -m 0700 "$FILELOGS_CONFIG_ROOT/backup"
 
 if id -u "$OWNER" >/dev/null 2>&1; then
-  chown "$OWNER:$GROUP" "$FILELOGS_LOG_ROOT" "$FILELOGS_CONFIG_ROOT" "$FILELOGS_CONFIG_ROOT/apps"
+  chown "$OWNER:$GROUP" \
+    "$FILELOGS_LOG_ROOT" \
+    "$FILELOGS_CONFIG_ROOT" \
+    "$FILELOGS_CONFIG_ROOT/apps" \
+    "$FILELOGS_CONFIG_ROOT/backup"
 fi
 
 # Install systemd timer if available.

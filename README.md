@@ -33,6 +33,9 @@ or introducing a sidecar.
 - Optional `auto-enable` for new apps.
 - `dokku filelogs:tail <app>` convenience command, with `--date` and
   `--lines`.
+- **S3 archival** to Amazon S3 or any S3-compatible service (MinIO,
+  Cloudflare R2, Backblaze B2, DigitalOcean Spaces). Incremental
+  sync of rotated `.log.gz` files; current open file is never touched.
 
 ## Requirements
 
@@ -40,6 +43,9 @@ or introducing a sidecar.
 - systemd (for the GC timer). Without systemd, you can run
   `dokku filelogs:gc` manually or from cron.
 - `gzip`, `gunzip`, `find`, `stat`, `du` — all standard on Linux hosts.
+- **Optional**: AWS CLI v2 (for S3 backup) — install from
+  <https://aws.amazon.com/cli/>. Cron must be available for scheduled
+  backups.
 
 ## Installation
 
@@ -97,6 +103,12 @@ dokku filelogs:tail my-app --date 2026-04-15
 | `filelogs:report [<app>]` | Show global or per-app configuration + current disk usage. |
 | `filelogs:gc` | Run GC immediately (bypass the 5-minute timer). |
 | `filelogs:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N] [--follow]` | Tail logs. `--date` concatenates all files of that day (daily + all hourly files). `--at` reads one specific hour. Transparently reads `.log` and `.log.gz`. |
+| `filelogs:backup <app>\|--all [--bucket <b>] [--prefix <p>]` | Sync rotated logs (`.log.gz` only) to S3. Never uploads the current open file. |
+| `filelogs:backup-auth <key> <secret> [region] [endpoint]` | Store S3 credentials (file mode 0600). `endpoint` enables S3-compatible backends. |
+| `filelogs:backup-deauth` | Remove stored credentials. |
+| `filelogs:backup-schedule "<cron>" --bucket <b> [--prefix <p>]` | Write `/etc/cron.d/dokku-filelogs-backup` to run `backup --all` on a cron schedule. |
+| `filelogs:backup-unschedule` | Remove the cron file. |
+| `filelogs:backup-report` | Show backup configuration + last run. |
 
 ## Configuration keys
 
@@ -110,6 +122,7 @@ dokku filelogs:tail my-app --date 2026-04-15
 | `auto-enable` | **global only** | `false` | If `true`, every new app gets `filelogs:enable` on `post-app-create`. |
 | `min-free-disk-percent` | **global only** | `10` | If free disk on the log volume drops below this, GC aggressively deletes rotated files (oldest first, never today's). Set to `0` to disable the watchdog. |
 | `rotation` | per-app / global | `daily` | `daily` → one file per UTC day (`YYYY-MM-DD.log`). `hourly` → one file per UTC hour (`YYYY-MM-DDTHH.log`). Use `hourly` for very chatty apps so the watchdog has finer-grained rotated files to reclaim. Changing this on an already-enabled app auto-refreshes the Vector sink. |
+| `backup-exclude` | per-app | `false` | If `true`, `filelogs:backup --all` skips this app. |
 
 Per-app values override global values, which override built-in defaults.
 
@@ -217,6 +230,70 @@ make unit-tests
 
 See [CLAUDE.md](./CLAUDE.md) for the full set of conventions (bash 3.2
 portability, test structure, safety guarantees).
+
+## S3 backup
+
+Back up rotated log files to Amazon S3 or any S3-compatible service.
+The current open `.log` is never uploaded — only rotated `.log.gz`
+files, via `aws s3 sync` with size/etag-based deduplication.
+
+### Setup
+
+```bash
+# 1. Install AWS CLI v2 on the Dokku host.
+
+# 2. Store credentials once (file mode 0600, owner dokku).
+dokku filelogs:backup-auth AKIA... SECRET... us-east-1
+
+# For S3-compatible services (MinIO, R2, Spaces, B2), pass endpoint:
+dokku filelogs:backup-auth KEY SECRET auto https://my-bucket.r2.cloudflarestorage.com
+
+# 3. Schedule recurring backups (example: daily at 03:00 UTC).
+dokku filelogs:backup-schedule "0 3 * * *" --bucket my-logs
+# Or with a prefix:
+dokku filelogs:backup-schedule "*/30 * * * *" --bucket my-logs --prefix archive
+
+# 4. Or run ad-hoc.
+dokku filelogs:backup my-app --bucket my-logs
+dokku filelogs:backup --all --bucket my-logs
+
+# 5. Inspect.
+dokku filelogs:backup-report
+```
+
+### On-disk layout on S3
+
+```
+s3://<bucket>/<prefix>/<app>/2026-04-21.log.gz
+s3://<bucket>/<prefix>/<app>/2026-04-22T00.log.gz    # if rotation=hourly
+s3://<bucket>/<prefix>/<app>/2026-04-22T01.log.gz
+...
+```
+
+### Per-app opt-out
+
+```bash
+dokku filelogs:set quiet-app backup-exclude true
+```
+
+### Relationship to GC
+
+Backup is **best-effort**, independent of GC. The GC watchdog still
+deletes files by retention and disk-pressure. If you need guaranteed
+archival, schedule backup at least as frequently as retention — e.g.,
+`retention-days=14` with a daily backup leaves a 13-day safety window.
+
+### Compatibility
+
+Anything that speaks the S3 API and works with `aws --endpoint-url`:
+
+- Amazon S3 (no endpoint flag)
+- Cloudflare R2
+- MinIO / MinIO Server
+- Backblaze B2 (S3-compatible endpoint)
+- DigitalOcean Spaces
+- Wasabi
+- Ceph RADOS Gateway
 
 ## License
 

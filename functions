@@ -70,6 +70,10 @@ filelogs_validate_value() {
       [[ "$val" == "daily" || "$val" == "hourly" ]] \
         || { echo "rotation must be daily|hourly" >&2; return 1; }
       ;;
+    backup-exclude)
+      [[ "$val" == "true" || "$val" == "false" ]] \
+        || { echo "backup-exclude must be true|false" >&2; return 1; }
+      ;;
     *)
       echo "unknown key: $key" >&2
       return 1
@@ -87,10 +91,16 @@ filelogs_config_path() {
 }
 
 filelogs_get_raw() {
+  # Always returns 0. Callers use `[[ -z "$val" ]]` to detect "unset".
+  # A non-zero return here would trip `set -e` when the caller does
+  # `val=$(filelogs_get_raw ...)`, silently killing the subcommand.
   local scope="$1" key="$2"
   local path
   path=$(filelogs_config_path "$scope" "$key")
-  [[ -f "$path" ]] && cat "$path"
+  if [[ -f "$path" ]]; then
+    cat "$path"
+  fi
+  return 0
 }
 
 filelogs_get_value() {
@@ -112,6 +122,7 @@ filelogs_get_value() {
     auto-enable)              echo "false" ;;
     min-free-disk-percent)    echo "$FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT" ;;
     rotation)                 echo "$FILELOGS_DEFAULT_ROTATION" ;;
+    backup-exclude)           echo "false" ;;
     *)                        echo "" ;;
   esac
 }
@@ -245,6 +256,118 @@ filelogs_free_percent() {
   fi
 
   echo $(( avail * 100 / total ))
+}
+
+#
+# S3 backup helpers
+#
+# Credentials live in $FILELOGS_CONFIG_ROOT/backup/credentials, mode 0600.
+# Format is KEY=VALUE, sourceable. Keys: AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION, FILELOGS_S3_ENDPOINT.
+#
+# Non-secret config (bucket, prefix, schedule, last-run) sits in
+# adjacent files.
+
+filelogs_backup_dir() {
+  echo "$FILELOGS_CONFIG_ROOT/backup"
+}
+
+filelogs_backup_get() {
+  # Always returns 0; see filelogs_get_raw for rationale.
+  local key="$1"
+  local f
+  f="$(filelogs_backup_dir)/$key"
+  if [[ -f "$f" ]]; then
+    cat "$f"
+  fi
+  return 0
+}
+
+filelogs_backup_set() {
+  local key="$1" val="$2"
+  local dir
+  dir="$(filelogs_backup_dir)"
+  mkdir -p "$dir"
+  chmod 0700 "$dir" 2>/dev/null || true
+  printf '%s' "$val" > "$dir/$key"
+}
+
+filelogs_backup_cred_get() {
+  local key="$1"
+  local f
+  f="$(filelogs_backup_dir)/credentials"
+  [[ -f "$f" ]] || return 0
+  awk -F= -v k="$key" '$1==k {sub(/^[^=]+=/,""); print; exit}' "$f"
+}
+
+filelogs_backup_auth_exists() {
+  local f
+  f="$(filelogs_backup_dir)/credentials"
+  [[ -f "$f" ]]
+}
+
+filelogs_backup_check_deps() {
+  if ! command -v aws >/dev/null 2>&1; then
+    echo "aws CLI not found. Install it from https://aws.amazon.com/cli/ and retry." >&2
+    return 1
+  fi
+}
+
+filelogs_backup_check_auth() {
+  if ! filelogs_backup_auth_exists; then
+    echo "no credentials. Run 'dokku ${PLUGIN_COMMAND_PREFIX}:backup-auth'." >&2
+    return 1
+  fi
+}
+
+filelogs_list_backup_candidates() {
+  local d
+  [[ -d "$FILELOGS_LOG_ROOT" ]] || return 0
+  for d in "$FILELOGS_LOG_ROOT"/*/; do
+    [[ -d "$d" ]] || continue
+    local app
+    app=$(basename "$d")
+    if [[ "$(filelogs_get_raw "$app" backup-exclude)" == "true" ]]; then
+      continue
+    fi
+    echo "$app"
+  done
+}
+
+filelogs_backup_sync_app() {
+  # Uploads rotated files for a single app to S3 via `aws s3 sync`.
+  # Excludes everything, includes only *.log.gz — so the
+  # actively-written current-day/current-hour .log is never uploaded
+  # mid-write.
+  local app="$1" bucket="$2" prefix="$3"
+  local src="$FILELOGS_LOG_ROOT/$app/"
+  [[ -d "$src" ]] || return 0
+
+  local dest="s3://$bucket"
+  [[ -n "$prefix" ]] && dest="$dest/$prefix"
+  dest="$dest/$app/"
+
+  local endpoint
+  endpoint=$(filelogs_backup_cred_get FILELOGS_S3_ENDPOINT)
+
+  local cred_file
+  cred_file="$(filelogs_backup_dir)/credentials"
+
+  # Run aws in a subshell so the exported creds don't leak.
+  (
+    set -a
+    # shellcheck source=/dev/null
+    source "$cred_file"
+    set +a
+    if [[ -n "$endpoint" ]]; then
+      aws s3 sync "$src" "$dest" \
+        --exclude "*" --include "*.log.gz" \
+        --endpoint-url "$endpoint"
+    else
+      aws s3 sync "$src" "$dest" \
+        --exclude "*" --include "*.log.gz"
+    fi
+  )
 }
 
 filelogs_list_apps() {

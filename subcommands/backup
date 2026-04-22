@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:backup"
+  [[ "${1:-}" == "$cmd" ]] && shift
+
+  local target="" bucket="" prefix=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bucket)    bucket="${2:-}"; shift 2 ;;
+      --bucket=*)  bucket="${1#*=}"; shift ;;
+      --prefix)    prefix="${2:-}"; shift 2 ;;
+      --prefix=*)  prefix="${1#*=}"; shift ;;
+      --all)       target="--all"; shift ;;
+      -*)          echo "unknown flag: $1" >&2; exit 1 ;;
+      *)
+        if [[ -z "$target" ]]; then
+          target="$1"
+        else
+          echo "unexpected arg: $1" >&2
+          exit 1
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$target" ]]; then
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:backup <app>|--all [--bucket <b>] [--prefix <p>]" >&2
+    exit 1
+  fi
+
+  [[ -z "$bucket" ]] && bucket="$(filelogs_backup_get bucket)"
+  [[ -z "$prefix" ]] && prefix="$(filelogs_backup_get prefix)"
+
+  if [[ -z "$bucket" ]]; then
+    echo "no bucket specified. Pass --bucket <name> or set a default with 'backup-schedule'." >&2
+    exit 1
+  fi
+
+  filelogs_backup_check_deps
+  filelogs_backup_check_auth
+
+  local apps=() app
+  if [[ "$target" == "--all" ]]; then
+    while IFS= read -r app; do
+      [[ -n "$app" ]] && apps+=("$app")
+    done < <(filelogs_list_backup_candidates)
+  else
+    apps+=("$target")
+  fi
+
+  if (( ${#apps[@]} == 0 )); then
+    echo "-----> no apps to back up"
+    return 0
+  fi
+
+  local failures=0
+  for app in "${apps[@]}"; do
+    echo "-----> syncing $app -> s3://$bucket${prefix:+/$prefix}/$app/"
+    if ! filelogs_backup_sync_app "$app" "$bucket" "$prefix"; then
+      echo "       FAILED: $app" >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  date -u +%s > "$(filelogs_backup_dir)/last-run"
+
+  if (( failures > 0 )); then
+    echo "filelogs: $failures app(s) failed to sync" >&2
+    exit 1
+  fi
+
+  echo "-----> backup complete (${#apps[@]} app(s))"
+}
+
+cmd_backup "$@"

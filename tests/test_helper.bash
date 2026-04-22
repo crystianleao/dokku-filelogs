@@ -21,8 +21,39 @@ STUB
   chmod +x "$DOKKU_STUB_DIR/dokku"
   export PATH="$DOKKU_STUB_DIR:$PATH"
 
+  # Stub `aws` CLI for backup tests — echoes invocation to log.
+  export AWS_CALLS_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
+  : > "$AWS_CALLS_LOG"
+  cat > "$DOKKU_STUB_DIR/aws" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AWS_CALLS_LOG"
+STUB
+  chmod +x "$DOKKU_STUB_DIR/aws"
+
+  # Redirect cron file to tmp so backup-schedule tests don't touch /etc.
+  export FILELOGS_CRON_FILE="$BATS_TEST_TMPDIR/cron/dokku-filelogs-backup"
+  export FILELOGS_DOKKU_BIN="/usr/bin/dokku"
+
   # Disable tracing noise in tests.
   unset DOKKU_TRACE
+}
+
+assert_aws_called_with() {
+  local needle="$1"
+  if ! grep -qF -- "$needle" "$AWS_CALLS_LOG"; then
+    echo "Expected aws call containing: $needle"
+    echo "Actual calls:"
+    cat "$AWS_CALLS_LOG"
+    return 1
+  fi
+}
+
+refute_aws_called() {
+  if [[ -s "$AWS_CALLS_LOG" ]]; then
+    echo "Expected no aws calls, but got:"
+    cat "$AWS_CALLS_LOG"
+    return 1
+  fi
 }
 
 source_plugin() {

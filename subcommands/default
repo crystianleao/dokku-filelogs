@@ -15,7 +15,14 @@ Subcommands:
   ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <key> <value>
   ${PLUGIN_COMMAND_PREFIX}:report [<app>]
   ${PLUGIN_COMMAND_PREFIX}:gc
-  ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--lines N]
+  ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N]
+  ${PLUGIN_COMMAND_PREFIX}:backup <app>|--all [--bucket <b>] [--prefix <p>]
+  ${PLUGIN_COMMAND_PREFIX}:backup-auth <key> <secret> [region] [endpoint]
+  ${PLUGIN_COMMAND_PREFIX}:backup-deauth
+  ${PLUGIN_COMMAND_PREFIX}:backup-schedule "<cron>" --bucket <b> [--prefix <p>]
+  ${PLUGIN_COMMAND_PREFIX}:backup-unschedule
+  ${PLUGIN_COMMAND_PREFIX}:backup-report
 
-Keys: retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable
+Keys: retention-days, max-app-bytes, max-total-bytes, format, compress,
+      auto-enable, min-free-disk-percent, rotation, backup-exclude
 EOF

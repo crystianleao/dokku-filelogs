@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup_schedule() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:backup-schedule"
+  [[ "${1:-}" == "$cmd" ]] && shift
+
+  local schedule="" bucket="" prefix=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bucket)    bucket="${2:-}"; shift 2 ;;
+      --bucket=*)  bucket="${1#*=}"; shift ;;
+      --prefix)    prefix="${2:-}"; shift 2 ;;
+      --prefix=*)  prefix="${1#*=}"; shift ;;
+      -*)          echo "unknown flag: $1" >&2; exit 1 ;;
+      *)
+        if [[ -z "$schedule" ]]; then
+          schedule="$1"
+        else
+          echo "unexpected arg: $1" >&2
+          exit 1
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$schedule" || -z "$bucket" ]]; then
+    cat >&2 <<EOF
+usage: dokku ${PLUGIN_COMMAND_PREFIX}:backup-schedule "<cron>" --bucket <name> [--prefix <p>]
+
+Example (every day at 03:00 UTC):
+  dokku ${PLUGIN_COMMAND_PREFIX}:backup-schedule "0 3 * * *" --bucket my-logs
+EOF
+    exit 1
+  fi
+
+  # Rough crontab sanity check: five whitespace-separated fields.
+  # Accepts any field content (ranges, steps, names).
+  if ! awk 'NF != 5 {exit 1}' <<< "$schedule" >/dev/null; then
+    echo "invalid cron expression (expected 5 fields): '$schedule'" >&2
+    exit 1
+  fi
+
+  filelogs_backup_check_auth
+
+  filelogs_backup_set bucket "$bucket"
+  [[ -n "$prefix" ]] && filelogs_backup_set prefix "$prefix"
+  filelogs_backup_set schedule "$schedule"
+
+  local cron_dir cron_tmp
+  cron_dir=$(dirname "$FILELOGS_CRON_FILE")
+  mkdir -p "$cron_dir"
+  cron_tmp=$(mktemp "$cron_dir/.dokku-filelogs-backup.XXXXXX")
+  {
+    printf '# dokku-filelogs backup schedule — managed, do not edit\n'
+    printf 'SHELL=/bin/bash\n'
+    printf 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n'
+    printf '%s dokku %s %s:backup --bucket %s%s --all >> /var/log/dokku/filelogs-backup.log 2>&1\n' \
+      "$schedule" \
+      "$FILELOGS_DOKKU_BIN" \
+      "$PLUGIN_COMMAND_PREFIX" \
+      "$bucket" \
+      "${prefix:+ --prefix $prefix}"
+  } > "$cron_tmp"
+  chmod 0644 "$cron_tmp"
+  mv "$cron_tmp" "$FILELOGS_CRON_FILE"
+
+  echo "-----> schedule written: $FILELOGS_CRON_FILE"
+  echo "       cron:   $schedule"
+  echo "       bucket: $bucket${prefix:+ prefix=$prefix}"
+}
+
+cmd_backup_schedule "$@"

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+cmd_backup_auth() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:backup-auth"
+  [[ "${1:-}" == "$cmd" ]] && shift
+
+  local key_id="${1:-}"
+  local secret="${2:-}"
+  local region="${3:-us-east-1}"
+  local endpoint="${4:-}"
+
+  if [[ -z "$key_id" || -z "$secret" ]]; then
+    cat >&2 <<EOF
+usage: dokku ${PLUGIN_COMMAND_PREFIX}:backup-auth <AWS_ACCESS_KEY_ID> <AWS_SECRET_ACCESS_KEY> [region] [endpoint-url]
+
+Examples:
+  # Amazon S3 default
+  dokku ${PLUGIN_COMMAND_PREFIX}:backup-auth AKIA... xyz... us-east-1
+
+  # S3-compatible (MinIO, R2, Spaces, B2)
+  dokku ${PLUGIN_COMMAND_PREFIX}:backup-auth <key> <secret> us-east-1 https://s3.my-host.example.com
+EOF
+    exit 1
+  fi
+
+  local dir
+  dir="$(filelogs_backup_dir)"
+  umask 077
+  mkdir -p "$dir"
+  chmod 0700 "$dir"
+
+  local tmp
+  tmp=$(mktemp "$dir/.credentials.XXXXXX")
+  {
+    printf 'AWS_ACCESS_KEY_ID=%s\n'      "$key_id"
+    printf 'AWS_SECRET_ACCESS_KEY=%s\n'  "$secret"
+    printf 'AWS_DEFAULT_REGION=%s\n'     "$region"
+    printf 'FILELOGS_S3_ENDPOINT=%s\n'   "$endpoint"
+  } > "$tmp"
+  chmod 0600 "$tmp"
+  mv "$tmp" "$dir/credentials"
+
+  echo "-----> backup credentials stored (region=$region${endpoint:+ endpoint=$endpoint})"
+}
+
+cmd_backup_auth "$@"

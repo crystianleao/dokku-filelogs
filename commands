@@ -14,7 +14,13 @@ case "$1" in
     ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable)
     ${PLUGIN_COMMAND_PREFIX}:report [<app>]               Show status + disk usage
     ${PLUGIN_COMMAND_PREFIX}:gc                           Force a garbage-collection run
-    ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--lines N]  Tail daily log
+    ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N]  Tail log
+    ${PLUGIN_COMMAND_PREFIX}:backup <app>|--all [--bucket <b>] [--prefix <p>]     Sync rotated logs to S3
+    ${PLUGIN_COMMAND_PREFIX}:backup-auth <key> <secret> [region] [endpoint]      Store S3 credentials
+    ${PLUGIN_COMMAND_PREFIX}:backup-deauth                                       Remove S3 credentials
+    ${PLUGIN_COMMAND_PREFIX}:backup-schedule "<cron>" --bucket <b> [--prefix <p>] Write /etc/cron.d schedule
+    ${PLUGIN_COMMAND_PREFIX}:backup-unschedule                                   Remove cron schedule
+    ${PLUGIN_COMMAND_PREFIX}:backup-report                                       Show backup config + last run
 EOF
     ;;
   *)
