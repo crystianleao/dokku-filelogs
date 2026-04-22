@@ -31,3 +31,11 @@ setup() { setup_plugin_env; }
   [ "$status" -eq 0 ]
   assert_dokku_called_with "logs:set myapp vector-sink"
 }
+
+@test "enable: hourly rotation produces %H path" {
+  source_plugin
+  filelogs_set_value myapp rotation hourly
+  run_subcommand enable myapp
+  [ "$status" -eq 0 ]
+  assert_dokku_called_with "%Y-%m-%dT%H.log"
+}

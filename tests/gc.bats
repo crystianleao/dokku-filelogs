@@ -6,6 +6,10 @@ setup() {
   setup_plugin_env
   # Speed up compression grace in tests.
   export FILELOGS_GC_GRACE_MINUTES=0
+  # Disable disk-pressure watchdog by default so real-host free% doesn't
+  # interfere with retention/cap-specific tests. Pressure tests opt in
+  # by re-setting FILELOGS_FAKE_FREE_PERCENT inside the test body.
+  export FILELOGS_FAKE_FREE_PERCENT=100
   source_plugin
 }
 
@@ -93,6 +97,66 @@ today_log() { echo "$FILELOGS_LOG_ROOT/$1/$(filelogs_today).log"; }
 @test "gc: empty log root exits cleanly" {
   run "$PLUGIN_ROOT/gc/gc.sh"
   [ "$status" -eq 0 ]
+}
+
+@test "gc: disk pressure trims rotated files when free% below threshold" {
+  filelogs_set_value --global min-free-disk-percent 50
+  filelogs_set_value --global retention-days 3650
+  filelogs_set_value --global max-total-bytes 100G
+  filelogs_set_value --global max-app-bytes 100G
+
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  for i in 1 2 3; do
+    local f="$FILELOGS_LOG_ROOT/myapp/2024-01-0$i.log.gz"
+    echo "data" > "$f"
+    touch_days_ago "$f" "$((10 - i))"
+  done
+
+  # Stub df-backed helper: pretend disk is full.
+  export FILELOGS_FAKE_FREE_PERCENT=0
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+
+  # All rotated files should be gone (loop drains until nothing left).
+  local remaining
+  remaining=$(find "$FILELOGS_LOG_ROOT/myapp" -type f | wc -l | tr -d ' ')
+  [ "$remaining" = "0" ]
+
+  # Stderr should announce pressure.
+  [[ "$output" = *"disk pressure"* ]]
+}
+
+@test "gc: disk pressure spares today's open log" {
+  filelogs_set_value --global min-free-disk-percent 50
+
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  echo "current" > "$today"
+
+  export FILELOGS_FAKE_FREE_PERCENT=0
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$today" ]
+}
+
+@test "gc: disk pressure no-op when threshold met" {
+  filelogs_set_value --global min-free-disk-percent 5
+
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local old="$FILELOGS_LOG_ROOT/myapp/2024-01-01.log.gz"
+  echo "keep" > "$old"
+  touch_days_ago "$old" 2
+  filelogs_set_value --global retention-days 3650
+
+  export FILELOGS_FAKE_FREE_PERCENT=90
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ -f "$old" ]
+  [[ "$output" != *"disk pressure"* ]]
 }
 
 @test "gc: compress=false keeps .log uncompressed" {

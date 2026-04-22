@@ -39,24 +39,32 @@ report_app() {
        max-app-bytes:    $max_app
        format:           $format
        compress:         $compress
+       rotation:         $(filelogs_get_value "$app" rotation)
 EOF
 }
 
 report_global() {
-  local total total_human max_total
+  local total total_human max_total free_pct threshold pressure
   total=$(filelogs_dir_bytes "$FILELOGS_LOG_ROOT")
   total_human=$(filelogs_bytes_to_human "$total")
   max_total=$(filelogs_get_value --global max-total-bytes)
+  free_pct=$(filelogs_free_percent "$FILELOGS_LOG_ROOT")
+  threshold=$(filelogs_get_value --global min-free-disk-percent)
+  pressure="ok"
+  (( free_pct < threshold )) && pressure="LOW"
   cat <<EOF
 =====> filelogs global report
-       log root:         $FILELOGS_LOG_ROOT
-       disk used (all):  $total_human
-       max-total-bytes:  $max_total
-       retention-days:   $(filelogs_get_value --global retention-days)
-       max-app-bytes:    $(filelogs_get_value --global max-app-bytes)
-       format:           $(filelogs_get_value --global format)
-       compress:         $(filelogs_get_value --global compress)
-       auto-enable:      $(filelogs_get_value --global auto-enable)
+       log root:                 $FILELOGS_LOG_ROOT
+       disk used (all apps):     $total_human
+       disk free:                ${free_pct}% (threshold: ${threshold}%, status: $pressure)
+       max-total-bytes:          $max_total
+       retention-days:           $(filelogs_get_value --global retention-days)
+       max-app-bytes:            $(filelogs_get_value --global max-app-bytes)
+       format:                   $(filelogs_get_value --global format)
+       compress:                 $(filelogs_get_value --global compress)
+       auto-enable:              $(filelogs_get_value --global auto-enable)
+       min-free-disk-percent:    $threshold
+       rotation (default):       $(filelogs_get_value --global rotation)
 EOF
 }
 

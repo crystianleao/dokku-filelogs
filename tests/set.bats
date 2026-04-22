@@ -43,6 +43,57 @@ setup() { setup_plugin_env; }
   [ "$status" -ne 0 ]
 }
 
+@test "set: --global min-free-disk-percent valid" {
+  run_subcommand set --global min-free-disk-percent 15
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/min-free-disk-percent")" = "15" ]
+}
+
+@test "set: min-free-disk-percent rejects out-of-range" {
+  run_subcommand set --global min-free-disk-percent 200
+  [ "$status" -ne 0 ]
+}
+
+@test "set: min-free-disk-percent is global-only" {
+  run_subcommand set myapp min-free-disk-percent 10
+  [ "$status" -ne 0 ]
+  [[ "$output" = *"--global"* ]]
+}
+
+@test "set: rotation daily valid" {
+  run_subcommand set myapp rotation daily
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "daily" ]
+}
+
+@test "set: rotation hourly valid" {
+  run_subcommand set myapp rotation hourly
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "hourly" ]
+}
+
+@test "set: rotation invalid rejected" {
+  run_subcommand set myapp rotation weekly
+  [ "$status" -ne 0 ]
+}
+
+@test "set: rotation change on enabled app re-applies Vector sink" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+
+  run_subcommand set myapp rotation hourly
+  [ "$status" -eq 0 ]
+  # enable subcommand was invoked, which in turn called dokku logs:set.
+  assert_dokku_called_with "logs:set myapp vector-sink"
+  assert_dokku_called_with "%Y-%m-%dT%H.log"
+}
+
+@test "set: rotation change on disabled app does not re-apply sink" {
+  run_subcommand set myapp rotation hourly
+  [ "$status" -eq 0 ]
+  refute_dokku_called
+}
+
 @test "set: missing args errors" {
   run_subcommand set myapp
   [ "$status" -ne 0 ]

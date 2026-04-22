@@ -113,7 +113,7 @@ setup() {
   [ "$output" = "30" ]
 }
 
-@test "build_sink_dsn: default format json" {
+@test "build_sink_dsn: default format json, default daily rotation" {
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
   [[ "$output" = "file://$FILELOGS_LOG_ROOT/myapp/%Y-%m-%d.log?encoding[codec]=json" ]]
@@ -123,6 +123,44 @@ setup() {
   filelogs_set_value myapp format text
   run filelogs_build_sink_dsn myapp
   [[ "$output" = *"encoding[codec]=text" ]]
+}
+
+@test "build_sink_dsn: hourly rotation injects %H into path" {
+  filelogs_set_value myapp rotation hourly
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"%Y-%m-%dT%H.log"* ]]
+}
+
+@test "rotation_pattern: daily default" {
+  run filelogs_rotation_pattern myapp
+  [ "$output" = "%Y-%m-%d" ]
+}
+
+@test "rotation_pattern: hourly override" {
+  filelogs_set_value myapp rotation hourly
+  run filelogs_rotation_pattern myapp
+  [ "$output" = "%Y-%m-%dT%H" ]
+}
+
+@test "current_log_name: daily" {
+  run filelogs_current_log_name myapp
+  [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.log$ ]]
+}
+
+@test "current_log_name: hourly" {
+  filelogs_set_value myapp rotation hourly
+  run filelogs_current_log_name myapp
+  [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.log$ ]]
+}
+
+@test "validate_value: rotation daily|hourly" {
+  run filelogs_validate_value rotation daily
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value rotation hourly
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value rotation nope
+  [ "$status" -ne 0 ]
 }
 
 @test "list_apps lists configured app dirs" {
@@ -144,6 +182,34 @@ setup() {
   run filelogs_dir_bytes "$BATS_TEST_TMPDIR/nonempty"
   [ "$status" -eq 0 ]
   [ "$output" -gt 0 ]
+}
+
+@test "free_percent: fake override returns that value" {
+  FILELOGS_FAKE_FREE_PERCENT=7 run filelogs_free_percent "$FILELOGS_LOG_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "7" ]
+}
+
+@test "free_percent: real df yields integer 0..100" {
+  run filelogs_free_percent "$FILELOGS_LOG_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[0-9]+$ ]]
+  [ "$output" -ge 0 ]
+  [ "$output" -le 100 ]
+}
+
+@test "validate_value: min-free-disk-percent in range" {
+  run filelogs_validate_value min-free-disk-percent 10
+  [ "$status" -eq 0 ]
+}
+
+@test "validate_value: min-free-disk-percent out of range" {
+  run filelogs_validate_value min-free-disk-percent 150
+  [ "$status" -ne 0 ]
+  run filelogs_validate_value min-free-disk-percent -1
+  [ "$status" -ne 0 ]
+  run filelogs_validate_value min-free-disk-percent abc
+  [ "$status" -ne 0 ]
 }
 
 @test "oldest_file picks oldest matching" {

@@ -100,6 +100,47 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
   `FILELOGS_GC_GRACE_MINUTES` (default 120) since its last mtime, so
   Vector has had time to close the fd after midnight rollover. Tests set
   this to 0 so compression is exercised immediately.
+- **Today's open log is never deleted, even under disk pressure.** The
+  `gc_disk_pressure` watchdog only trims rotated files
+  (`.log.gz` + old `.log`). If the current-day file alone fills the
+  disk, the plugin cannot recover from that — it is a known gap
+  documented in README.md. Bounded-today-size would require racing
+  Vector's fd (copytruncate + SIGHUP) and is intentionally out of scope.
+
+### Rotation modes
+
+- `rotation` key accepts `daily` (default) or `hourly`. It maps to the
+  strftime fragment Vector uses in the file-sink path:
+  - `daily`  → `%Y-%m-%d`       → `2026-04-22.log`
+  - `hourly` → `%Y-%m-%dT%H`    → `2026-04-22T15.log`
+- Helpers `filelogs_rotation_pattern <app>` and
+  `filelogs_current_log_name <app>` centralize this mapping; do not
+  scatter strftime strings across subcommands.
+- GC functions protect **both** the daily and hourly current filenames
+  in every exclusion, regardless of the app's configured rotation. This
+  costs nothing and makes mid-flight rotation switches safe.
+- `tail` accepts `--date YYYY-MM-DD` (matches daily file and all 24
+  hourly files for that date) and `--at YYYY-MM-DDTHH` (exact hour).
+  Sorting by filename gives chronological order because the strftime
+  patterns are zero-padded.
+- `set rotation <v>` auto-re-runs `enable` for an already-enabled app so
+  Vector picks up the new DSN. Global rotation changes only affect
+  newly-enabled apps; the set subcommand prints an advisory.
+
+### Disk-pressure watchdog
+
+- `gc_disk_pressure` runs **after** `gc_app` and `gc_global`, so normal
+  caps get a chance first.
+- Uses `filelogs_free_percent` which calls `df -P -k` portably.
+- Test hook: set `FILELOGS_FAKE_FREE_PERCENT=<int>` to bypass `df` and
+  force a value. `tests/gc.bats` `setup()` sets it to `100` by default
+  so retention/cap-specific tests are not disturbed by the real host's
+  free space (the dev box commonly runs at ~2% free).
+- `oldest_file*` helpers must always `return 0`, even when no file
+  matched. If they inherit `[[ -n "" ]]`'s non-zero exit, `set -eo
+  pipefail` kills the whole GC run the moment the watchdog loop
+  iterates once with no more trimmable files. Regression hazard —
+  don't tail the function with `[[ -n "$x" ]] && echo "$x"`.
 
 ## Test conventions
 
@@ -152,6 +193,17 @@ even non-exported ones. Both:
 5. Surface it in `subcommands/report` output.
 6. Add unit tests for the new branch in `tests/set.bats` and
    `tests/functions.bats`.
+
+## Known limitations (documented, do not try to silently fix)
+
+- **Unbounded growth of today's open log.** If an app writes faster
+  than the day rolls over, the current-day file will grow until the
+  disk fills. The watchdog expires rotated files aggressively, but
+  cannot touch today's open fd. Mitigation would require either
+  `copytruncate` + SIGHUP to Vector, or a separate size-triggered
+  rollover — both race the Vector process and are deliberately out of
+  scope. Users are expected to size their log volume with headroom and
+  rely on the watchdog to reclaim from yesterday's rotations first.
 
 ## What NOT to do
 

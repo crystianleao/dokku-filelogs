@@ -12,8 +12,10 @@ export FILELOGS_DEFAULT_MAX_APP_BYTES="${FILELOGS_DEFAULT_MAX_APP_BYTES:-1G}"
 export FILELOGS_DEFAULT_MAX_TOTAL_BYTES="${FILELOGS_DEFAULT_MAX_TOTAL_BYTES:-10G}"
 export FILELOGS_DEFAULT_FORMAT="${FILELOGS_DEFAULT_FORMAT:-json}"
 export FILELOGS_DEFAULT_COMPRESS="${FILELOGS_DEFAULT_COMPRESS:-true}"
+export FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT="${FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT:-10}"
+export FILELOGS_DEFAULT_ROTATION="${FILELOGS_DEFAULT_ROTATION:-daily}"
 
 # NB: space-separated strings (not bash arrays) so they survive being sourced
 # inside a function in bash 3.2 (macOS dev) — a known bash 3.2 scoping bug.
-export FILELOGS_VALID_KEYS="retention-days max-app-bytes max-total-bytes format compress auto-enable"
-export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable"
+export FILELOGS_VALID_KEYS="retention-days max-app-bytes max-total-bytes format compress auto-enable min-free-disk-percent rotation"
+export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable min-free-disk-percent"

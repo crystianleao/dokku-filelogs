@@ -12,7 +12,15 @@
       "Bash(make lint *)",
       "Bash(make unit-tests *)",
       "Bash(make test *)",
-      "Bash(/bin/bash *)"
+      "Bash(/bin/bash *)",
+      "Bash(export FILELOGS_LOG_ROOT=/tmp/flogs-test FILELOGS_CONFIG_ROOT=/tmp/flogs-config)",
+      "Bash(rm -rf /tmp/flogs-test /tmp/flogs-config)",
+      "Bash(mkdir -p /tmp/flogs-test /tmp/flogs-config)",
+      "Bash(bash /Users/crystianleao/Desktop/RDMAPPS/EU/text-logs/gc/gc.sh)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(export FILELOGS_LOG_ROOT=/tmp/flogs-test FILELOGS_CONFIG_ROOT=/tmp/flogs-config DOKKU_TRACE=1)",
+      "Bash(curl -sL https://raw.githubusercontent.com/dokku/dokku-postgres/master/LICENSE.md)",
+      "Bash(curl -sL https://raw.githubusercontent.com/dokku/dokku-postgres/master/__TRACKED_VAR__)"
     ]
   }
 }

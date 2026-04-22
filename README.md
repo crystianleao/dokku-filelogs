@@ -72,6 +72,10 @@ dokku filelogs:set my-app format text
 # Auto-enable for newly-created apps
 dokku filelogs:set --global auto-enable true
 
+# Switch a noisy app to hourly rotation (shrinks unbounded window from
+# 24h to 1h so the disk watchdog has finer-grained files to reclaim)
+dokku filelogs:set noisy-app rotation hourly
+
 # See what's going on
 dokku filelogs:report
 dokku filelogs:report my-app
@@ -92,7 +96,7 @@ dokku filelogs:tail my-app --date 2026-04-15
 | `filelogs:set <app\|--global> <key> <value>` | Persist a config value. Validates. |
 | `filelogs:report [<app>]` | Show global or per-app configuration + current disk usage. |
 | `filelogs:gc` | Run GC immediately (bypass the 5-minute timer). |
-| `filelogs:tail <app> [--date YYYY-MM-DD] [--lines N] [--follow]` | Tail the daily file. Transparently reads `.log` or `.log.gz`. |
+| `filelogs:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N] [--follow]` | Tail logs. `--date` concatenates all files of that day (daily + all hourly files). `--at` reads one specific hour. Transparently reads `.log` and `.log.gz`. |
 
 ## Configuration keys
 
@@ -104,6 +108,8 @@ dokku filelogs:tail my-app --date 2026-04-15
 | `format` | per-app / global | `json` | `json` or `text`. Maps to Vector `encoding[codec]`. |
 | `compress` | per-app / global | `true` | gzip rotated (non-today) logs. |
 | `auto-enable` | **global only** | `false` | If `true`, every new app gets `filelogs:enable` on `post-app-create`. |
+| `min-free-disk-percent` | **global only** | `10` | If free disk on the log volume drops below this, GC aggressively deletes rotated files (oldest first, never today's). Set to `0` to disable the watchdog. |
+| `rotation` | per-app / global | `daily` | `daily` → one file per UTC day (`YYYY-MM-DD.log`). `hourly` → one file per UTC hour (`YYYY-MM-DDTHH.log`). Use `hourly` for very chatty apps so the watchdog has finer-grained rotated files to reclaim. Changing this on an already-enabled app auto-refreshes the Vector sink. |
 
 Per-app values override global values, which override built-in defaults.
 
@@ -137,8 +143,32 @@ for the current day.
 - GC never deletes today's open log file. A grace window
   (`FILELOGS_GC_GRACE_MINUTES`, default 120) prevents racing Vector's
   midnight rollover.
+- A **disk-pressure watchdog** runs after every GC cycle. If free space
+  on the log volume falls below `min-free-disk-percent` (default 10%),
+  the watchdog deletes rotated files (oldest first, across all apps)
+  until either the threshold is met or nothing else can be trimmed.
+  `filelogs:report` surfaces free-disk state with an `ok` / `LOW`
+  status line.
 - If `systemctl` is not available, the installer skips the timer and
   the plugin degrades to manual `filelogs:gc` runs.
+
+### Known limitation: today's open log
+
+The watchdog only trims **rotated** files — it never touches the
+currently-open log for the active rotation window, to avoid racing
+Vector's file descriptor. **A single chatty app can therefore still
+fill the disk within one rotation window.** Mitigations available to you:
+
+1. **Switch that app to hourly rotation**:
+   `dokku filelogs:set <app> rotation hourly`. The rotation window shrinks
+   from 24h to 1h, so the watchdog can reclaim all but the current hour's
+   file — 24× finer-grained recovery.
+2. Put `/var/log/dokku/apps` on a dedicated volume sized with headroom.
+3. Lower `retention-days` and `max-app-bytes` so less headroom is
+   consumed by rotations.
+4. Keep `min-free-disk-percent` high (e.g., 20%) so the watchdog
+   reclaims aggressively before pressure turns into an outage.
+5. Use application-level rate-limiting for noisy loggers.
 
 ## Tuning
 
@@ -147,6 +177,7 @@ for the current day.
 | `FILELOGS_LOG_ROOT` | `/var/log/dokku/apps` | Where daily logs are written. |
 | `FILELOGS_CONFIG_ROOT` | `/var/lib/dokku/services/filelogs` | Persistent config store. |
 | `FILELOGS_GC_GRACE_MINUTES` | `120` | Minutes a non-today `.log` must be untouched before it's eligible for compression. |
+| `FILELOGS_FAKE_FREE_PERCENT` | _(unset)_ | Test-only override for `df`-backed free-percent detection. Takes precedence over real `df`. |
 
 Set these in `/etc/default/dokku-filelogs` if you need to relocate the
 log root (e.g., to a dedicated volume) and reference it from the
@@ -189,4 +220,4 @@ portability, test structure, safety guarantees).
 
 ## License
 
-MIT.
+MIT. See [LICENSE.txt](./LICENSE.txt).

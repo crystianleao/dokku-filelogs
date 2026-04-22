@@ -12,6 +12,21 @@ setup() { setup_plugin_env; }
   [[ "$output" = *"max-total-bytes"* ]]
 }
 
+@test "report: shows disk free percent and status" {
+  FILELOGS_FAKE_FREE_PERCENT=90 run_subcommand report
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"disk free:"* ]]
+  [[ "$output" = *"90%"* ]]
+  [[ "$output" = *"status: ok"* ]]
+}
+
+@test "report: flags LOW status when below threshold" {
+  export FILELOGS_FAKE_FREE_PERCENT=3
+  run_subcommand report
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"status: LOW"* ]]
+}
+
 @test "report: per-app shows enabled state yes when flag present" {
   mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp"
   echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"

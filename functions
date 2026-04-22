@@ -5,6 +5,29 @@
 set -eo pipefail
 
 filelogs_today() { date -u +%Y-%m-%d; }
+filelogs_current_hour() { date -u +%Y-%m-%dT%H; }
+
+filelogs_rotation_pattern() {
+  # Strftime fragment used in Vector's file-sink path (no .log suffix).
+  # daily  -> "%Y-%m-%d"           -> 2026-04-22.log
+  # hourly -> "%Y-%m-%dT%H"        -> 2026-04-22T15.log
+  local app="$1" rotation
+  rotation=$(filelogs_get_value "$app" rotation)
+  case "$rotation" in
+    hourly) echo '%Y-%m-%dT%H' ;;
+    *)      echo '%Y-%m-%d' ;;
+  esac
+}
+
+filelogs_current_log_name() {
+  # Basename of the file Vector is currently writing for <app>.
+  local app="$1" rotation
+  rotation=$(filelogs_get_value "$app" rotation)
+  case "$rotation" in
+    hourly) echo "$(filelogs_current_hour).log" ;;
+    *)      echo "$(filelogs_today).log" ;;
+  esac
+}
 
 filelogs_is_valid_key() {
   local key="$1" k
@@ -36,6 +59,16 @@ filelogs_validate_value() {
       ;;
     compress | auto-enable)
       [[ "$val" == "true" || "$val" == "false" ]] || { echo "$key must be true|false" >&2; return 1; }
+      ;;
+    min-free-disk-percent)
+      if ! [[ "$val" =~ ^[0-9]+$ ]] || (( val < 0 || val > 100 )); then
+        echo "min-free-disk-percent must be integer 0-100" >&2
+        return 1
+      fi
+      ;;
+    rotation)
+      [[ "$val" == "daily" || "$val" == "hourly" ]] \
+        || { echo "rotation must be daily|hourly" >&2; return 1; }
       ;;
     *)
       echo "unknown key: $key" >&2
@@ -76,8 +109,10 @@ filelogs_get_value() {
     max-total-bytes)  echo "$FILELOGS_DEFAULT_MAX_TOTAL_BYTES" ;;
     format)           echo "$FILELOGS_DEFAULT_FORMAT" ;;
     compress)         echo "$FILELOGS_DEFAULT_COMPRESS" ;;
-    auto-enable)      echo "false" ;;
-    *)                echo "" ;;
+    auto-enable)              echo "false" ;;
+    min-free-disk-percent)    echo "$FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT" ;;
+    rotation)                 echo "$FILELOGS_DEFAULT_ROTATION" ;;
+    *)                        echo "" ;;
   esac
 }
 
@@ -131,10 +166,13 @@ filelogs_app_is_enabled() {
 }
 
 filelogs_build_sink_dsn() {
-  local app="$1" format
+  local app="$1" format pattern
   format=$(filelogs_get_value "$app" format)
-  printf 'file://%s/%s/%%Y-%%m-%%d.log?encoding[codec]=%s' \
-    "$FILELOGS_LOG_ROOT" "$app" "$format"
+  pattern=$(filelogs_rotation_pattern "$app")
+  # strftime tokens (%Y etc) are passed through to Vector, which expands
+  # them at write time. URL query holds the codec knob.
+  printf 'file://%s/%s/%s.log?encoding[codec]=%s' \
+    "$FILELOGS_LOG_ROOT" "$app" "$pattern" "$format"
 }
 
 filelogs_mtime() {
@@ -161,7 +199,10 @@ filelogs_oldest_file() {
       best="$f"
     fi
   done < <(find "$dir" -maxdepth 1 -type f "$@" -print0 2>/dev/null)
-  [[ -n "$best" ]] && echo "$best"
+  if [[ -n "$best" ]]; then
+    echo "$best"
+  fi
+  return 0
 }
 
 filelogs_oldest_file_recursive() {
@@ -177,7 +218,33 @@ filelogs_oldest_file_recursive() {
       best="$f"
     fi
   done < <(find "$dir" -mindepth 2 -type f "$@" -print0 2>/dev/null)
-  [[ -n "$best" ]] && echo "$best"
+  if [[ -n "$best" ]]; then
+    echo "$best"
+  fi
+  return 0
+}
+
+filelogs_free_percent() {
+  # Percent of free space on the filesystem hosting <dir>.
+  # Test hook: set FILELOGS_FAKE_FREE_PERCENT to bypass df (integer 0-100).
+  local dir="$1"
+
+  if [[ -n "${FILELOGS_FAKE_FREE_PERCENT:-}" ]]; then
+    echo "$FILELOGS_FAKE_FREE_PERCENT"
+    return
+  fi
+
+  [[ -d "$dir" ]] || { echo 100; return; }
+
+  local total avail
+  read -r total avail < <(df -P -k "$dir" 2>/dev/null | awk 'NR==2 {print $2, $4}')
+
+  if [[ -z "$total" || "$total" -eq 0 ]]; then
+    echo 100
+    return
+  fi
+
+  echo $(( avail * 100 / total ))
 }
 
 filelogs_list_apps() {

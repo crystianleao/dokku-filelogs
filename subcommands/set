@@ -3,6 +3,7 @@ set -eo pipefail
 [[ $DOKKU_TRACE ]] && set -x
 
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PLUGIN_ROOT
 # shellcheck source=config
 source "$PLUGIN_ROOT/config"
 # shellcheck source=functions
@@ -34,6 +35,19 @@ cmd_set() {
   filelogs_set_value "$scope" "$key" "$val"
 
   echo "-----> $scope: $key=$val"
+
+  # Keys that change Vector's file-sink DSN must be re-applied to a live app.
+  case "$key" in
+    rotation | format)
+      if [[ "$scope" != "--global" ]] && filelogs_app_is_enabled "$scope"; then
+        echo "-----> re-applying Vector sink for $scope (DSN-affecting key changed)"
+        "$PLUGIN_ROOT/subcommands/enable" "$scope"
+      elif [[ "$scope" == "--global" ]]; then
+        echo "       note: affects only newly-enabled apps. Run" \
+             "'dokku ${PLUGIN_COMMAND_PREFIX}:enable <app>' to refresh existing apps." >&2
+      fi
+      ;;
+  esac
 }
 
 cmd_set "$@"
