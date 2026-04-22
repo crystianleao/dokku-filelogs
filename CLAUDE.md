@@ -1,0 +1,166 @@
+# CLAUDE.md — dokku-filelogs project rules
+
+Rules for future Claude sessions working on this plugin.
+
+## What this is
+
+A Dokku plugin that persists per-app logs to daily-rotated files on disk and
+enforces per-app + global disk caps via a systemd-scheduled GC daemon. It
+layers on top of Dokku's built-in Vector integration (uses `dokku logs:set
+<app> vector-sink file://...`); it does **not** replace Vector or Docker
+logging.
+
+## Repository layout
+
+```
+commands                CLI help dispatcher
+config                  defaults (paths, retention, caps). Space-separated
+                        strings, NOT bash arrays (see "bash 3.2 quirks").
+functions               shared helpers. Safe to source multiple times.
+install / uninstall     lifecycle — install drops systemd units into
+                        /etc/systemd/system/.
+post-app-create         auto-enable hook (reads global auto-enable flag).
+post-app-rename         moves log/config dirs, re-issues vector-sink.
+post-delete             removes app log + config dirs. Guarded to only
+                        delete under $FILELOGS_LOG_ROOT.
+subcommands/*           one file per `filelogs:<cmd>`. Each is executable.
+gc/gc.sh                GC daemon. Compresses, applies retention, enforces
+                        per-app and global caps. Never touches today's
+                        currently-open .log file.
+systemd/*.tmpl          templated unit files. `install` sed-replaces
+                        __PLUGIN_ROOT__, __OWNER__, __GROUP__.
+tests/                  bats suite + test_helper.bash.
+Makefile                `make test` = lint + unit-tests.
+```
+
+## Development workflow
+
+- `make test` — runs shellcheck + bats. Must pass before any commit.
+- `make lint` — shellcheck only.
+- `make unit-tests` — bats only.
+- `make ci-dependencies` — installs bats + shellcheck (apt or brew).
+
+Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
+(bash 4+, GNU find/stat/du). Code must work on both.
+
+## Hard rules
+
+### Portability
+
+- **bash 3.2 compatible**. macOS ships 3.2 and `#!/usr/bin/env bash` picks
+  it up. Do not use `mapfile`, associative arrays, `${var,,}`, or any
+  bash-4-only feature.
+- **Do not put bash arrays in `config`**. Bash 3.2 has a known bug where an
+  array declared inside a file that is sourced from within a function is
+  dropped when the function returns. `config` is sourced from `setup()` in
+  bats, so any array there ends up empty. Use space-separated strings and
+  iterate with `for k in $STRING; do`. This is load-bearing — the bats
+  suite caught it during build.
+- **Do not use `find -printf`**. GNU-only, breaks on BSD find (macOS).
+  Use `filelogs_oldest_file` / `filelogs_oldest_file_recursive` helpers,
+  which use portable `stat` (GNU `-c` with BSD `-f` fallback).
+- **Do not use `du -sb`**. BSD du has no `-b`. `filelogs_dir_bytes`
+  already handles the fallback.
+- **Do not use `zcat`**. Some macOS versions only accept `.Z` files.
+  Use `gunzip -c`.
+- **`touch -t YYYYMMDDHHMM.SS`** is the portable form. GNU `date -d "N days
+  ago"` and BSD `date -v-Nd` diverge — `touch_days_ago` in `test_helper.bash`
+  picks the right one.
+
+### Bash style
+
+- Every executable script starts with:
+  ```bash
+  #!/usr/bin/env bash
+  set -eo pipefail
+  [[ $DOKKU_TRACE ]] && set -x
+  ```
+- Do **not** use `set -u`. Dokku triggers pass optional args; empty vars
+  are expected.
+- Prefer `if/then/else` over `A && B || C`. shellcheck SC2015 fires on
+  the latter.
+- Source relative to the script:
+  ```bash
+  PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  source "$PLUGIN_ROOT/config"
+  source "$PLUGIN_ROOT/functions"
+  ```
+- All functions and variables related to this plugin are prefixed
+  `filelogs_` / `FILELOGS_`.
+
+### Safety
+
+- **`post-delete` must never `rm -rf` outside `$FILELOGS_LOG_ROOT`**. The
+  current guard (`case "$FILELOGS_LOG_ROOT/$APP"` whitelist) is intentional.
+  If the trigger arg is empty, the script exits early.
+- `gc.sh` must never delete a file named `$(filelogs_today).log`. Vector
+  holds an open fd for it; deleting would break logging. All three GC
+  loops (`gc_apply_retention`, `gc_enforce_cap`, `gc_global`) filter it.
+- Compression of a non-today `.log` only happens after
+  `FILELOGS_GC_GRACE_MINUTES` (default 120) since its last mtime, so
+  Vector has had time to close the fd after midnight rollover. Tests set
+  this to 0 so compression is exercised immediately.
+
+## Test conventions
+
+- Each subcommand has a `tests/<name>.bats` file. Each trigger is covered
+  in `tests/hooks.bats`. Shared helpers live in `tests/functions.bats`.
+- Tests load `test_helper.bash` which provides:
+  - `setup_plugin_env` — creates per-test tmp dirs, exports
+    `FILELOGS_LOG_ROOT` / `FILELOGS_CONFIG_ROOT`, stubs `dokku` on PATH.
+  - `source_plugin` — sources `config` then `functions`.
+  - `touch_days_ago <file> <days>` — portable mtime setter.
+  - `assert_dokku_called_with <substring>` / `refute_dokku_called` —
+    checks the stub's call log at `$DOKKU_CALLS_LOG`.
+  - `run_subcommand <name> [args]` / `run_trigger <name> [args]` —
+    thin wrappers over bats' `run`.
+
+### Known bats gotcha
+
+`run` executes in a subshell. **Arrays do not propagate into the subshell**,
+even non-exported ones. Both:
+- Avoid arrays (see the `config` rule above), or
+- Call the function directly in the test body, not via `run`, when you
+  need to assert return status:
+  ```bash
+  @test "example" {
+    filelogs_is_valid_key retention-days   # asserts return 0
+    ! filelogs_is_valid_key bogus          # asserts return non-zero
+  }
+  ```
+
+## Adding a new subcommand
+
+1. Create `subcommands/<name>`, executable, following the existing
+   subcommand scaffolding (sources config + functions, wraps logic in a
+   `cmd_<name>` function, handles the `filelogs:<name>` prefix shift).
+2. Add a line to the help text in `commands` and `subcommands/default`.
+3. If the subcommand mutates state, add a `post-delete`-style trigger if
+   cleanup is needed on app removal.
+4. Add a `tests/<name>.bats`. Cover the happy path, argument validation,
+   and at least one failure mode.
+5. Update `SCRIPTS` in the Makefile so shellcheck lints the new file.
+6. `make test` must pass.
+
+## Adding a new config key
+
+1. Add a default in `config` (`FILELOGS_DEFAULT_<key_upper>`).
+2. Add the key to `FILELOGS_VALID_KEYS` (and, if it cannot be per-app,
+   to `FILELOGS_GLOBAL_ONLY_KEYS`).
+3. Extend `filelogs_validate_value` in `functions` with a case branch.
+4. Extend `filelogs_get_value` with a fallback case.
+5. Surface it in `subcommands/report` output.
+6. Add unit tests for the new branch in `tests/set.bats` and
+   `tests/functions.bats`.
+
+## What NOT to do
+
+- Do not import Docker logging drivers or run a sidecar supervisord.
+  The Vector integration is Dokku-supported; replacing it is out of scope.
+- Do not add `--force` flags that bypass the today-file protection.
+- Do not silently catch errors in GC — a broken GC that appears to
+  succeed is worse than one that loudly fails the systemd unit.
+- Do not add dependencies beyond `bash`, coreutils, `gzip`, `find`,
+  `stat`, `du`, `systemd`. The plugin must run on a stock Dokku host.
+- Do not `chown` any path outside `$FILELOGS_LOG_ROOT` /
+  `$FILELOGS_CONFIG_ROOT`.
