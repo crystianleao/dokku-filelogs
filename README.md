@@ -44,7 +44,7 @@ or introducing a sidecar.
 ## Installation
 
 ```bash
-sudo dokku plugin:install https://github.com/<you>/dokku-filelogs.git filelogs
+sudo dokku plugin:install https://github.com/crystianleao/dokku-filelogs.git filelogs
 ```
 
 The installer:
