@@ -172,3 +172,101 @@ today_log() { echo "$FILELOGS_LOG_ROOT/$1/$(filelogs_today).log"; }
   [ -f "$old" ]
   [ ! -f "$old.gz" ]
 }
+
+@test "gc: size-trigger warns when current log exceeds cap" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  filelogs_set_value myapp max-current-log-bytes 1K
+  filelogs_set_value myapp retention-days 3650
+
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  dd if=/dev/zero of="$today" bs=1024 count=4 >/dev/null 2>&1
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"exceeds cap"* ]]
+  [ -f "$today" ]
+}
+
+@test "gc: size-trigger does not downgrade without flag" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value myapp rotation daily
+  filelogs_set_value myapp max-current-log-bytes 1K
+  filelogs_set_value myapp retention-days 3650
+
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  dd if=/dev/zero of="$today" bs=1024 count=4 >/dev/null 2>&1
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "daily" ]
+}
+
+@test "gc: size-trigger downgrades daily->hourly when flag enabled" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value --global pressure-auto-downgrade true
+  filelogs_set_value myapp rotation daily
+  filelogs_set_value myapp max-current-log-bytes 1K
+  filelogs_set_value myapp retention-days 3650
+
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  dd if=/dev/zero of="$today" bs=1024 count=4 >/dev/null 2>&1
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "hourly" ]
+  assert_dokku_called_with "logs:set myapp vector-sink"
+}
+
+@test "gc: watchdog downgrades daily apps when pressure persists and flag set" {
+  filelogs_set_value --global min-free-disk-percent 50
+  filelogs_set_value --global max-total-bytes 100G
+  filelogs_set_value --global max-app-bytes 100G
+  filelogs_set_value --global retention-days 3650
+  filelogs_set_value --global pressure-auto-downgrade true
+
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value myapp rotation daily
+  # Big enough to not re-trigger size-trigger (cap is the 500M default).
+  filelogs_set_value myapp max-current-log-bytes 10G
+
+  # Today's open file is tiny — force pressure purely via fake free%.
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  echo "x" > "$today"
+
+  export FILELOGS_FAKE_FREE_PERCENT=0
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "hourly" ]
+  [[ "$output" = *"pressure persists"* ]]
+}
+
+@test "gc: watchdog does not downgrade without pressure-auto-downgrade flag" {
+  filelogs_set_value --global min-free-disk-percent 50
+  filelogs_set_value --global max-total-bytes 100G
+  filelogs_set_value --global max-app-bytes 100G
+  filelogs_set_value --global retention-days 3650
+
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value myapp rotation daily
+  filelogs_set_value myapp max-current-log-bytes 10G
+
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  echo "x" > "$today"
+
+  export FILELOGS_FAKE_FREE_PERCENT=0
+
+  run "$PLUGIN_ROOT/gc/gc.sh"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "daily" ]
+  [[ "$output" != *"pressure persists"* ]]
+}

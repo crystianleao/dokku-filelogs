@@ -47,3 +47,19 @@ setup() { setup_plugin_env; }
   run_subcommand report myapp
   [[ "$output" = *"disk used:"* ]]
 }
+
+@test "report: per-app shows current log size + cap" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp" "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  run_subcommand report myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"current log:"* ]]
+  [[ "$output" = *"cap:"* ]]
+}
+
+@test "report: global shows pressure-auto-downgrade line" {
+  run_subcommand report
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"pressure-auto-downgrade"* ]]
+  [[ "$output" = *"max-current-log-bytes"* ]]
+}

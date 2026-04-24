@@ -30,11 +30,17 @@ report_app() {
   local compress
   compress=$(filelogs_get_value "$app" compress)
 
+  local current_bytes current_human current_cap
+  current_bytes=$(filelogs_current_log_bytes "$app")
+  current_human=$(filelogs_bytes_to_human "$current_bytes")
+  current_cap=$(filelogs_get_value "$app" max-current-log-bytes)
+
   cat <<EOF
 =====> $app filelogs information
        enabled:          $enabled
        log dir:          $log_dir
        disk used:        $used_human
+       current log:      $current_human (cap: $current_cap)
        retention-days:   $retention
        max-app-bytes:    $max_app
        format:           $format
@@ -65,6 +71,8 @@ report_global() {
        auto-enable:              $(filelogs_get_value --global auto-enable)
        min-free-disk-percent:    $threshold
        rotation (default):       $(filelogs_get_value --global rotation)
+       max-current-log-bytes:    $(filelogs_get_value --global max-current-log-bytes)
+       pressure-auto-downgrade:  $(filelogs_get_value --global pressure-auto-downgrade)
 EOF
 }
 

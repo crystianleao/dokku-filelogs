@@ -14,11 +14,13 @@ export FILELOGS_DEFAULT_FORMAT="${FILELOGS_DEFAULT_FORMAT:-json}"
 export FILELOGS_DEFAULT_COMPRESS="${FILELOGS_DEFAULT_COMPRESS:-true}"
 export FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT="${FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT:-10}"
 export FILELOGS_DEFAULT_ROTATION="${FILELOGS_DEFAULT_ROTATION:-daily}"
+export FILELOGS_DEFAULT_MAX_CURRENT_LOG_BYTES="${FILELOGS_DEFAULT_MAX_CURRENT_LOG_BYTES:-500M}"
+export FILELOGS_DEFAULT_PRESSURE_AUTO_DOWNGRADE="${FILELOGS_DEFAULT_PRESSURE_AUTO_DOWNGRADE:-false}"
 
 # NB: space-separated strings (not bash arrays) so they survive being sourced
 # inside a function in bash 3.2 (macOS dev) — a known bash 3.2 scoping bug.
-export FILELOGS_VALID_KEYS="retention-days max-app-bytes max-total-bytes format compress auto-enable min-free-disk-percent rotation backup-exclude"
-export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable min-free-disk-percent"
+export FILELOGS_VALID_KEYS="retention-days max-app-bytes max-total-bytes format compress auto-enable min-free-disk-percent rotation backup-exclude max-current-log-bytes pressure-auto-downgrade"
+export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable min-free-disk-percent pressure-auto-downgrade"
 
 # Path where backup-schedule writes a cron file. Overridable for tests.
 export FILELOGS_CRON_FILE="${FILELOGS_CRON_FILE:-/etc/cron.d/dokku-filelogs-backup}"

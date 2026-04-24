@@ -56,10 +56,38 @@ gc_enforce_cap() {
   done
 }
 
+gc_check_current_log_size() {
+  # Warn when the currently-open log exceeds max-current-log-bytes. If
+  # pressure-auto-downgrade is true, downgrade rotation daily->hourly
+  # to force Vector to close the oversized fd and open a smaller one.
+  # Next GC tick will compress the now-closed daily file.
+  local app="$1"
+  local cap_raw cap_bytes size
+  cap_raw=$(filelogs_get_value "$app" max-current-log-bytes)
+  [[ -z "$cap_raw" || "$cap_raw" == "0" ]] && return 0
+
+  cap_bytes=$(filelogs_human_to_bytes "$cap_raw")
+  size=$(filelogs_current_log_bytes "$app")
+  (( size <= cap_bytes )) && return 0
+
+  echo "filelogs: $app current log ${size}B exceeds cap ${cap_bytes}B ($cap_raw)" >&2
+
+  local auto
+  auto=$(filelogs_get_value --global pressure-auto-downgrade)
+  [[ "$auto" == "true" ]] || return 0
+
+  filelogs_downgrade_rotation "$app" || true
+}
+
 gc_app() {
   local app="$1"
   local dir="$FILELOGS_LOG_ROOT/$app"
   [[ -d "$dir" ]] || return 0
+
+  # Size-trigger runs first so a downgrade (which re-emits the Vector
+  # DSN) happens before retention/cap scans rely on the current-log
+  # filename. The downgrade helper is a no-op if rotation != daily.
+  gc_check_current_log_size "$app"
 
   # Protect both possible "current" names regardless of the app's
   # rotation setting. Cheaper than reading per-app config and works
@@ -128,6 +156,25 @@ gc_disk_pressure() {
     rm -f -- "$oldest"
     free_pct=$(filelogs_free_percent "$FILELOGS_LOG_ROOT")
   done
+
+  # Still under pressure after exhausting rotated files? The current
+  # open .log is the only remaining culprit. If the operator opted in
+  # via pressure-auto-downgrade, switch every daily app to hourly so
+  # Vector closes the oversized daily fd. Next GC tick can then reclaim
+  # the closed file via normal retention/compression paths.
+  if (( free_pct < threshold )); then
+    local auto
+    auto=$(filelogs_get_value --global pressure-auto-downgrade)
+    if [[ "$auto" == "true" ]]; then
+      echo "filelogs: pressure persists post-trim — downgrading daily apps" >&2
+      local d app
+      for d in "$FILELOGS_LOG_ROOT"/*/; do
+        [[ -d "$d" ]] || continue
+        app=$(basename "$d")
+        filelogs_downgrade_rotation "$app" || true
+      done
+    fi
+  fi
 
   echo "filelogs: disk pressure post-trim free=${free_pct}%" >&2
 }

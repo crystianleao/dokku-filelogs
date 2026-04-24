@@ -98,3 +98,26 @@ setup() { setup_plugin_env; }
   run_subcommand set myapp
   [ "$status" -ne 0 ]
 }
+
+@test "set: per-app max-current-log-bytes" {
+  run_subcommand set myapp max-current-log-bytes 200M
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/max-current-log-bytes")" = "200M" ]
+}
+
+@test "set: max-current-log-bytes rejects garbage" {
+  run_subcommand set myapp max-current-log-bytes 500XX
+  [ "$status" -ne 0 ]
+}
+
+@test "set: pressure-auto-downgrade is global-only" {
+  run_subcommand set myapp pressure-auto-downgrade true
+  [ "$status" -ne 0 ]
+  [[ "$output" = *"--global"* ]]
+}
+
+@test "set: --global pressure-auto-downgrade true" {
+  run_subcommand set --global pressure-auto-downgrade true
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/pressure-auto-downgrade")" = "true" ]
+}

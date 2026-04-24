@@ -220,3 +220,104 @@ setup() {
   run filelogs_oldest_file "$BATS_TEST_TMPDIR/d" -name "*.log"
   [[ "$output" = *"old.log" ]]
 }
+
+@test "validate_value: max-current-log-bytes accepts bytes or N[KMG]" {
+  run filelogs_validate_value max-current-log-bytes 500M
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value max-current-log-bytes 1073741824
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value max-current-log-bytes 2g
+  [ "$status" -eq 0 ]
+}
+
+@test "validate_value: max-current-log-bytes rejects garbage" {
+  run filelogs_validate_value max-current-log-bytes "500XX"
+  [ "$status" -ne 0 ]
+}
+
+@test "validate_value: pressure-auto-downgrade is boolean" {
+  run filelogs_validate_value pressure-auto-downgrade true
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value pressure-auto-downgrade false
+  [ "$status" -eq 0 ]
+  run filelogs_validate_value pressure-auto-downgrade sometimes
+  [ "$status" -ne 0 ]
+}
+
+@test "is_valid_key accepts max-current-log-bytes and pressure-auto-downgrade" {
+  filelogs_is_valid_key max-current-log-bytes
+  filelogs_is_valid_key pressure-auto-downgrade
+}
+
+@test "is_global_only_key: pressure-auto-downgrade is global-only" {
+  filelogs_is_global_only_key pressure-auto-downgrade
+}
+
+@test "is_global_only_key: max-current-log-bytes is not global-only" {
+  ! filelogs_is_global_only_key max-current-log-bytes
+}
+
+@test "get_value: max-current-log-bytes default is set" {
+  run filelogs_get_value myapp max-current-log-bytes
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  [[ "$output" =~ ^[0-9]+[KkMmGg]?$ ]]
+}
+
+@test "get_value: pressure-auto-downgrade default is false" {
+  run filelogs_get_value --global pressure-auto-downgrade
+  [ "$output" = "false" ]
+}
+
+@test "file_size: missing file returns 0" {
+  run filelogs_file_size "$BATS_TEST_TMPDIR/nope"
+  [ "$status" -eq 0 ]
+  [ "$output" = "0" ]
+}
+
+@test "file_size: reports size for real file" {
+  dd if=/dev/zero of="$BATS_TEST_TMPDIR/f" bs=1024 count=2 >/dev/null 2>&1
+  run filelogs_file_size "$BATS_TEST_TMPDIR/f"
+  [ "$status" -eq 0 ]
+  [ "$output" = "2048" ]
+}
+
+@test "current_log_bytes: 0 when today file absent" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  run filelogs_current_log_bytes myapp
+  [ "$output" = "0" ]
+}
+
+@test "current_log_bytes: reads today's size under daily rotation" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local today
+  today="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  dd if=/dev/zero of="$today" bs=1024 count=3 >/dev/null 2>&1
+  run filelogs_current_log_bytes myapp
+  [ "$output" = "3072" ]
+}
+
+@test "downgrade_rotation: no-op when not enabled" {
+  filelogs_set_value myapp rotation daily
+  ! filelogs_downgrade_rotation myapp
+  refute_dokku_called
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "daily" ]
+}
+
+@test "downgrade_rotation: no-op when already hourly" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value myapp rotation hourly
+  ! filelogs_downgrade_rotation myapp
+  refute_dokku_called
+}
+
+@test "downgrade_rotation: switches daily->hourly and re-emits DSN" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  filelogs_set_value myapp rotation daily
+  filelogs_downgrade_rotation myapp
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "hourly" ]
+  assert_dokku_called_with "logs:set myapp vector-sink"
+  assert_dokku_called_with "%Y-%m-%dT%H.log"
+}

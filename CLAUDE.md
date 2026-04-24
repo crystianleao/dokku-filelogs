@@ -102,10 +102,25 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
   this to 0 so compression is exercised immediately.
 - **Today's open log is never deleted, even under disk pressure.** The
   `gc_disk_pressure` watchdog only trims rotated files
-  (`.log.gz` + old `.log`). If the current-day file alone fills the
-  disk, the plugin cannot recover from that — it is a known gap
-  documented in README.md. Bounded-today-size would require racing
-  Vector's fd (copytruncate + SIGHUP) and is intentionally out of scope.
+  (`.log.gz` + old `.log`). The plugin does not truncate or copytruncate
+  Vector's open fd — that would race the Vector process and risk sparse
+  files. Instead, oversized current logs are mitigated by **rotation
+  downgrade**: when `pressure-auto-downgrade=true` (global, default
+  `false`), the GC switches offending apps from `daily` to `hourly`,
+  re-issuing `dokku logs:set vector-sink` so Vector closes the oversized
+  daily fd and opens a new hourly file. The closed daily file then
+  becomes eligible for normal compression/retention on the next tick.
+  Trigger points:
+    - **per-app size cap:** `max-current-log-bytes` (default `500M`).
+      Checked in `gc_check_current_log_size` at the start of `gc_app`.
+      Warns on breach; acts only if the global flag is on.
+    - **global watchdog fallback:** after `gc_disk_pressure` exhausts
+      rotated files and free% is still below threshold, downgrades every
+      daily app (flag-gated).
+  Rationale for the flag gate: `logs:set vector-sink` briefly churns
+  Vector's sink config, which can drop buffered events. Operators who
+  prefer log gaps over disk-fills opt in; everyone else keeps the old
+  known-gap behavior.
 
 ### Rotation modes
 
@@ -233,14 +248,14 @@ even non-exported ones. Both:
 
 ## Known limitations (documented, do not try to silently fix)
 
-- **Unbounded growth of today's open log.** If an app writes faster
-  than the day rolls over, the current-day file will grow until the
-  disk fills. The watchdog expires rotated files aggressively, but
-  cannot touch today's open fd. Mitigation would require either
-  `copytruncate` + SIGHUP to Vector, or a separate size-triggered
-  rollover — both race the Vector process and are deliberately out of
-  scope. Users are expected to size their log volume with headroom and
-  rely on the watchdog to reclaim from yesterday's rotations first.
+- **Unbounded growth of today's open log (mitigable).** If an app
+  writes faster than the day rolls over, the current-day file will
+  grow until the disk fills. The watchdog cannot touch today's open
+  fd directly. Mitigation available via `max-current-log-bytes`
+  (per-app size cap) + `pressure-auto-downgrade=true` (global flag)
+  — see the "Today's open log is never deleted" section under
+  Safety above. With the flag off, the limitation stands: size the
+  log volume with headroom and rely on rotated-file reclamation.
 
 ## What NOT to do
 

@@ -74,6 +74,14 @@ filelogs_validate_value() {
       [[ "$val" == "true" || "$val" == "false" ]] \
         || { echo "backup-exclude must be true|false" >&2; return 1; }
       ;;
+    max-current-log-bytes)
+      [[ "$val" =~ ^[0-9]+[KkMmGg]?$ ]] \
+        || { echo "max-current-log-bytes must be bytes or N[K|M|G]" >&2; return 1; }
+      ;;
+    pressure-auto-downgrade)
+      [[ "$val" == "true" || "$val" == "false" ]] \
+        || { echo "pressure-auto-downgrade must be true|false" >&2; return 1; }
+      ;;
     *)
       echo "unknown key: $key" >&2
       return 1
@@ -123,6 +131,8 @@ filelogs_get_value() {
     min-free-disk-percent)    echo "$FILELOGS_DEFAULT_MIN_FREE_DISK_PERCENT" ;;
     rotation)                 echo "$FILELOGS_DEFAULT_ROTATION" ;;
     backup-exclude)           echo "false" ;;
+    max-current-log-bytes)    echo "$FILELOGS_DEFAULT_MAX_CURRENT_LOG_BYTES" ;;
+    pressure-auto-downgrade)  echo "$FILELOGS_DEFAULT_PRESSURE_AUTO_DOWNGRADE" ;;
     *)                        echo "" ;;
   esac
 }
@@ -378,4 +388,44 @@ filelogs_list_apps() {
     [[ -d "$app" ]] || continue
     basename "$app"
   done
+}
+
+filelogs_file_size() {
+  # Portable file size in bytes. GNU stat -c %s, BSD stat -f %z.
+  # Returns 0 (and exit 0) for a missing file.
+  local f="$1"
+  [[ -f "$f" ]] || { echo 0; return 0; }
+  if stat -c %s "$f" >/dev/null 2>&1; then
+    stat -c %s "$f"
+  else
+    stat -f %z "$f"
+  fi
+}
+
+filelogs_current_log_bytes() {
+  # Size in bytes of the currently-open (today/current-hour) log file
+  # for <app>, honoring the app's rotation setting. 0 if not yet created.
+  local app="$1"
+  local name
+  name=$(filelogs_current_log_name "$app")
+  filelogs_file_size "$FILELOGS_LOG_ROOT/$app/$name"
+}
+
+filelogs_downgrade_rotation() {
+  # Switch <app>'s rotation from daily to hourly, then re-issue the
+  # Vector file-sink DSN so Vector drops the daily fd and opens the new
+  # hourly path. Safe to call repeatedly: no-op if already hourly or if
+  # the app is not enabled. Returns 0 on action, 1 on no-op.
+  local app="$1"
+  local current
+  current=$(filelogs_get_value "$app" rotation)
+  if [[ "$current" != "daily" ]]; then
+    return 1
+  fi
+  filelogs_app_is_enabled "$app" || return 1
+
+  filelogs_set_value "$app" rotation hourly
+  "$PLUGIN_ROOT/subcommands/enable" "$app" >&2
+  echo "filelogs: downgraded $app rotation daily -> hourly" >&2
+  return 0
 }
