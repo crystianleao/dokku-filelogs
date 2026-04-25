@@ -116,7 +116,7 @@ setup() {
 @test "build_sink_dsn: default format json, default daily rotation" {
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
-  [[ "$output" = "file://$FILELOGS_LOG_ROOT/myapp/%Y-%m-%d.log?encoding[codec]=json" ]]
+  [[ "$output" = "file://$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log?encoding[codec]=json" ]]
 }
 
 @test "build_sink_dsn: honors format override" {
@@ -129,7 +129,57 @@ setup() {
   filelogs_set_value myapp rotation hourly
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
-  [[ "$output" = *"%Y-%m-%dT%H.log"* ]]
+  [[ "$output" = *"%25Y-%25m-%25dT%25H.log"* ]]
+}
+
+@test "build_sink_dsn: contains no bare strftime tokens" {
+  # Regression: bare %Y in path makes Dokku's url.Parse fail with
+  # "invalid URL escape \"%Y-\"". All percent signs must ship as %25.
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"%Y"* ]]
+  [[ "$output" != *"%m"* ]]
+  [[ "$output" != *"%d"* ]]
+  [[ "$output" = *"%25Y-%25m-%25d"* ]]
+}
+
+@test "build_sink_dsn: hourly form has no bare %H either" {
+  filelogs_set_value myapp rotation hourly
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"%H"* ]]
+  [[ "$output" = *"%25H"* ]]
+}
+
+@test "build_sink_dsn: parses cleanly under Go-style URL parser" {
+  # If python3 isn't available we cannot run this check; skip rather
+  # than fail. urllib.parse.urlparse rejects invalid percent escapes
+  # the same way Go's net/url does.
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  local dsn="$output"
+
+  run python3 - <<PY "$dsn"
+import sys, urllib.parse
+p = urllib.parse.urlparse(sys.argv[1])
+# Path must decode without error and contain the strftime template.
+decoded = urllib.parse.unquote(p.path, errors='strict')
+assert decoded.endswith('.log'), decoded
+assert '%Y-%m-%d' in decoded, decoded
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "url_encode_pattern: leaves percent-free input untouched" {
+  run filelogs_url_encode_pattern "plain-text"
+  [ "$output" = "plain-text" ]
+}
+
+@test "url_encode_pattern: encodes every percent" {
+  run filelogs_url_encode_pattern "%Y-%m-%dT%H"
+  [ "$output" = "%25Y-%25m-%25dT%25H" ]
 }
 
 @test "rotation_pattern: daily default" {
@@ -319,5 +369,5 @@ setup() {
   filelogs_downgrade_rotation myapp
   [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/rotation")" = "hourly" ]
   assert_dokku_called_with "logs:set myapp vector-sink"
-  assert_dokku_called_with "%Y-%m-%dT%H.log"
+  assert_dokku_called_with "%25Y-%25m-%25dT%25H.log"
 }

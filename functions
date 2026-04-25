@@ -186,14 +186,25 @@ filelogs_app_is_enabled() {
   [[ -f "$FILELOGS_CONFIG_ROOT/apps/$app/enabled" ]]
 }
 
+filelogs_url_encode_pattern() {
+  # URL-encode `%` so strftime tokens (%Y, %m, %d, %H) survive Dokku's
+  # url.Parse step. Bare "%Y" is rejected as an invalid percent escape;
+  # "%25Y" decodes back to "%Y" before reaching Vector, which then
+  # expands the strftime token at write time.
+  local p="$1"
+  echo "${p//%/%25}"
+}
+
 filelogs_build_sink_dsn() {
-  local app="$1" format pattern
+  local app="$1" format pattern enc_pattern
   format=$(filelogs_get_value "$app" format)
   pattern=$(filelogs_rotation_pattern "$app")
-  # strftime tokens (%Y etc) are passed through to Vector, which expands
-  # them at write time. URL query holds the codec knob.
+  enc_pattern=$(filelogs_url_encode_pattern "$pattern")
+  # strftime tokens are URL-encoded so the DSN parses cleanly; Dokku
+  # decodes once and passes the strftime template to Vector. URL query
+  # holds the codec knob.
   printf 'file://%s/%s/%s.log?encoding[codec]=%s' \
-    "$FILELOGS_LOG_ROOT" "$app" "$pattern" "$format"
+    "$FILELOGS_LOG_ROOT" "$app" "$enc_pattern" "$format"
 }
 
 filelogs_mtime() {

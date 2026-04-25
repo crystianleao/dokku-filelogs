@@ -25,7 +25,11 @@
       "Bash(bats tests/backup.bats)",
       "Bash(/Users/crystianleao/Desktop/RDMAPPS/EU/text-logs/subcommands/backup myapp *)",
       "Bash(rm -rf /tmp/flog-manual-test)",
-      "Bash(mkdir -p /tmp/flog-manual-test/logs /tmp/flog-manual-test/config/apps)"
+      "Bash(mkdir -p /tmp/flog-manual-test/logs /tmp/flog-manual-test/config/apps)",
+      "Bash(command -v python3)",
+      "Bash(command -v perl)",
+      "Bash(/Users/crystianleao/Desktop/RDMAPPS/EU/text-logs/commands help *)",
+      "Bash(/Users/crystianleao/Desktop/RDMAPPS/EU/text-logs/commands filelogs:help)"
     ]
   }
 }

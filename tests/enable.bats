@@ -37,5 +37,13 @@ setup() { setup_plugin_env; }
   filelogs_set_value myapp rotation hourly
   run_subcommand enable myapp
   [ "$status" -eq 0 ]
-  assert_dokku_called_with "%Y-%m-%dT%H.log"
+  assert_dokku_called_with "%25Y-%25m-%25dT%25H.log"
+}
+
+@test "enable: DSN passed to dokku contains no bare strftime tokens" {
+  # Regression: Dokku url.Parse rejects "%Y-" as invalid percent escape.
+  run_subcommand enable myapp
+  [ "$status" -eq 0 ]
+  ! grep -E '%[YmdH][^0-9a-fA-F]' "$DOKKU_CALLS_LOG"
+  grep -F '%25Y-%25m-%25d.log' "$DOKKU_CALLS_LOG"
 }

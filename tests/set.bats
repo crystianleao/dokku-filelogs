@@ -85,7 +85,7 @@ setup() { setup_plugin_env; }
   [ "$status" -eq 0 ]
   # enable subcommand was invoked, which in turn called dokku logs:set.
   assert_dokku_called_with "logs:set myapp vector-sink"
-  assert_dokku_called_with "%Y-%m-%dT%H.log"
+  assert_dokku_called_with "%25Y-%25m-%25dT%25H.log"
 }
 
 @test "set: rotation change on disabled app does not re-apply sink" {

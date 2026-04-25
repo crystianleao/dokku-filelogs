@@ -24,5 +24,6 @@ Subcommands:
   ${PLUGIN_COMMAND_PREFIX}:backup-report
 
 Keys: retention-days, max-app-bytes, max-total-bytes, format, compress,
-      auto-enable, min-free-disk-percent, rotation, backup-exclude
+      auto-enable, min-free-disk-percent, rotation, backup-exclude,
+      max-current-log-bytes, pressure-auto-downgrade
 EOF

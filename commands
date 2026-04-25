@@ -7,11 +7,19 @@ PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PLUGIN_ROOT/config"
 
 case "$1" in
-  help | "${PLUGIN_COMMAND_PREFIX}:help")
+  help)
+    # Top-level `dokku help`: emit one summary line. Full command list
+    # lives behind `dokku ${PLUGIN_COMMAND_PREFIX}:help` to match the
+    # convention used by core Dokku plugins.
+    cat <<EOF
+    ${PLUGIN_COMMAND_PREFIX}, persist Dokku app logs to daily files with per-app + global disk caps
+EOF
+    ;;
+  "${PLUGIN_COMMAND_PREFIX}:help")
     cat <<EOF
     ${PLUGIN_COMMAND_PREFIX}:enable <app>                 Enable file logging for app
     ${PLUGIN_COMMAND_PREFIX}:disable <app>                Disable file logging for app
-    ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable)
+    ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable, min-free-disk-percent, rotation, backup-exclude, max-current-log-bytes, pressure-auto-downgrade)
     ${PLUGIN_COMMAND_PREFIX}:report [<app>]               Show status + disk usage
     ${PLUGIN_COMMAND_PREFIX}:gc                           Force a garbage-collection run
     ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N]  Tail log
