@@ -189,6 +189,43 @@ filelogs_app_is_enabled() {
   [[ -f "$FILELOGS_CONFIG_ROOT/apps/$app/enabled" ]]
 }
 
+filelogs_format_line_plain() {
+  # Read NDJSON from stdin, emit "<timestamp> [<container_name>] <message>"
+  # one line at a time. Lines that are not valid JSON, or JSON that
+  # isn't an object, pass through unchanged so format=text files also
+  # work. If python3 is missing the helper degrades to a pass-through.
+  #
+  # Note: we use `python3 -c` rather than a heredoc because heredocs
+  # collide with stdin when the function is invoked in a pipeline
+  # (`... | filelogs_format_line_plain`) — the heredoc replaces the
+  # piped data on python's stdin.
+  if ! command -v python3 >/dev/null 2>&1; then
+    cat
+    return
+  fi
+  python3 -u -c '
+import sys, json
+for line in sys.stdin:
+    raw = line.rstrip("\n")
+    try:
+        e = json.loads(raw)
+    except Exception:
+        sys.stdout.write(raw + "\n"); continue
+    if not isinstance(e, dict):
+        sys.stdout.write(raw + "\n"); continue
+    ts = e.get("timestamp", "") or ""
+    msg = e.get("message", raw)
+    cn = e.get("container_name", "") or ""
+    parts = []
+    if ts: parts.append(ts)
+    if cn: parts.append("[" + cn + "]")
+    if parts:
+        sys.stdout.write(" ".join(parts) + " " + str(msg) + "\n")
+    else:
+        sys.stdout.write(str(msg) + "\n")
+'
+}
+
 filelogs_validate_dsn() {
   # Best-effort pre-flight: catch invalid percent escapes before they
   # poison Dokku's vector.json. Mirrors what Go's net/url.Parse rejects:

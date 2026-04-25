@@ -93,3 +93,88 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" = *"hourly-current"* ]]
 }
+
+@test "tail: plain render extracts timestamp + container + message from JSON" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local f
+  f="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  cat > "$f" <<'JSON'
+{"timestamp":"2026-04-25T03:08:50.770Z","message":"GET /users","container_name":"myapp.web.1"}
+JSON
+
+  run_subcommand tail myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"2026-04-25T03:08:50.770Z"* ]]
+  [[ "$output" = *"[myapp.web.1]"* ]]
+  [[ "$output" = *"GET /users"* ]]
+  # No raw JSON braces in default output.
+  [[ "$output" != *"\"timestamp\""* ]]
+}
+
+@test "tail: --raw keeps JSON intact" {
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local f
+  f="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  echo '{"timestamp":"2026-04-25T03:00:00Z","message":"raw","container_name":"myapp.web.1"}' > "$f"
+
+  run_subcommand tail myapp --raw
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"\"timestamp\""* ]]
+  [[ "$output" = *"\"message\":\"raw\""* ]]
+}
+
+@test "tail: plain render passes through non-JSON lines unchanged" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local f
+  f="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  printf 'plain-line-1\nplain-line-2\n' > "$f"
+
+  run_subcommand tail myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"plain-line-1"* ]]
+  [[ "$output" = *"plain-line-2"* ]]
+}
+
+@test "tail: plain render handles JSON with missing fields" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local f
+  f="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  cat > "$f" <<'JSON'
+{"message":"no-timestamp-here"}
+{"timestamp":"2026-04-25T03:00:00Z","message":"no-container"}
+JSON
+
+  run_subcommand tail myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"no-timestamp-here"* ]]
+  [[ "$output" = *"2026-04-25T03:00:00Z"* ]]
+  [[ "$output" = *"no-container"* ]]
+}
+
+@test "tail: plain render survives mixed JSON + plain" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+  local f
+  f="$FILELOGS_LOG_ROOT/myapp/$(filelogs_today).log"
+  cat > "$f" <<'EOF'
+not-json-here
+{"timestamp":"2026-04-25T03:00:00Z","message":"json-msg","container_name":"web.1"}
+also-plain
+EOF
+
+  run_subcommand tail myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"not-json-here"* ]]
+  [[ "$output" = *"json-msg"* ]]
+  [[ "$output" = *"also-plain"* ]]
+}
+
+@test "tail: format_line_plain function passes through when stdin is empty" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  run bash -c 'source "$0/config" && source "$0/functions" && : | filelogs_format_line_plain' "$PLUGIN_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}

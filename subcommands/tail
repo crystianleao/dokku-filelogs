@@ -21,7 +21,7 @@ cmd_tail() {
   local cmd="${PLUGIN_COMMAND_PREFIX}:tail"
   [[ "${1:-}" == "$cmd" ]] && shift
 
-  local app="" date_arg="" lines=100 follow=0
+  local app="" date_arg="" lines=100 follow=0 raw=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,6 +32,7 @@ cmd_tail() {
       --lines|-n)      lines="${2:-100}"; shift 2 ;;
       --lines=*)       lines="${1#*=}"; shift ;;
       --follow|-f)     follow=1; shift ;;
+      --raw)           raw=1; shift ;;
       -*)              echo "unknown flag: $1" >&2; exit 1 ;;
       *)
         if [[ -z "$app" ]]; then
@@ -45,7 +46,7 @@ cmd_tail() {
   done
 
   if [[ -z "$app" ]]; then
-    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD[THH]] [--lines N] [--follow]" >&2
+    echo "usage: dokku ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD[THH]] [--lines N] [--follow] [--raw]" >&2
     exit 1
   fi
 
@@ -59,7 +60,11 @@ cmd_tail() {
       echo "no current log file at $current" >&2
       exit 1
     fi
-    tail -n "$lines" -F "$current"
+    if (( raw == 1 )); then
+      tail -n "$lines" -F "$current"
+    else
+      tail -n "$lines" -F "$current" | filelogs_format_line_plain
+    fi
     return
   fi
 
@@ -93,11 +98,19 @@ cmd_tail() {
     exit 1
   fi
 
-  {
-    for f in "${files[@]}"; do
-      stream_file "$f"
-    done
-  } | tail -n "$lines"
+  if (( raw == 1 )); then
+    {
+      for f in "${files[@]}"; do
+        stream_file "$f"
+      done
+    } | tail -n "$lines"
+  else
+    {
+      for f in "${files[@]}"; do
+        stream_file "$f"
+      done
+    } | tail -n "$lines" | filelogs_format_line_plain
+  fi
 }
 
 cmd_tail "$@"

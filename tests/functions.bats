@@ -123,10 +123,20 @@ setup() {
   [ "$output" = "30" ]
 }
 
-@test "build_sink_dsn: default format json, default daily rotation" {
+@test "build_sink_dsn: default format compact, default daily rotation" {
+  # Compact is the default format so log lines carry a `timestamp`
+  # field out of the box. The DSN therefore includes only_fields.
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
-  [[ "$output" = "file:///?path=$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log&encoding[codec]=json" ]]
+  [[ "$output" = "file:///?path=$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log&encoding[codec]=json&encoding[only_fields][0]=timestamp&encoding[only_fields][1]=message&encoding[only_fields][2]=container_name" ]]
+}
+
+@test "build_sink_dsn: explicit format json drops only_fields" {
+  filelogs_set_value myapp format json
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"only_fields"* ]]
+  [[ "$output" = *"encoding[codec]=json" ]]
 }
 
 @test "build_sink_dsn: honors format override" {
@@ -173,7 +183,8 @@ setup() {
   [[ "$output" = *"encoding[only_fields][2]=container_name"* ]]
 }
 
-@test "build_sink_dsn: format json does not emit only_fields" {
+@test "build_sink_dsn: format text drops only_fields" {
+  filelogs_set_value myapp format text
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
   [[ "$output" != *"only_fields"* ]]

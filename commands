@@ -23,7 +23,7 @@ EOF
     ${PLUGIN_COMMAND_PREFIX}:report [<app>]               Show status + disk usage
     ${PLUGIN_COMMAND_PREFIX}:doctor [<app>]               Run health checks (vector, config, sinks, GC timer)
     ${PLUGIN_COMMAND_PREFIX}:gc                           Force a garbage-collection run
-    ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N]  Tail log
+    ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N] [--follow] [--raw]  Tail log (plain render by default; --raw for JSON)
     ${PLUGIN_COMMAND_PREFIX}:backup <app>|--all [--bucket <b>] [--prefix <p>]     Sync rotated logs to S3
     ${PLUGIN_COMMAND_PREFIX}:backup-auth <key> <secret> [region] [endpoint]      Store S3 credentials
     ${PLUGIN_COMMAND_PREFIX}:backup-deauth                                       Remove S3 credentials
