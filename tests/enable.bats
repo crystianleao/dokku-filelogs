@@ -7,7 +7,7 @@ setup() { setup_plugin_env; }
 @test "enable: calls dokku logs:set with file sink and marks enabled" {
   run_subcommand enable myapp
   [ "$status" -eq 0 ]
-  assert_dokku_called_with "logs:set myapp vector-sink file://"
+  assert_dokku_called_with "logs:set myapp vector-sink file:///?path="
   [ -f "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled" ]
   [ -d "$FILELOGS_LOG_ROOT/myapp" ]
 }

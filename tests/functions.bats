@@ -116,7 +116,7 @@ setup() {
 @test "build_sink_dsn: default format json, default daily rotation" {
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
-  [[ "$output" = "file://$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log?encoding[codec]=json" ]]
+  [[ "$output" = "file:///?path=$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log&encoding[codec]=json" ]]
 }
 
 @test "build_sink_dsn: honors format override" {
@@ -132,8 +132,18 @@ setup() {
   [[ "$output" = *"%25Y-%25m-%25dT%25H.log"* ]]
 }
 
+@test "build_sink_dsn: uses ?path= query param, not URL path" {
+  # Regression: putting the abs path in the URL component makes Dokku
+  # emit a vector.json sink with no `path` field, and Vector enters a
+  # restart loop. Path must ship as the `path` query parameter.
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = "file:///?path="* ]]
+  [[ "$output" = *"&encoding[codec]="* ]]
+}
+
 @test "build_sink_dsn: contains no bare strftime tokens" {
-  # Regression: bare %Y in path makes Dokku's url.Parse fail with
+  # Regression: bare %Y in DSN makes Dokku's url.Parse fail with
   # "invalid URL escape \"%Y-\"". All percent signs must ship as %25.
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
@@ -154,7 +164,8 @@ setup() {
 @test "build_sink_dsn: parses cleanly under Go-style URL parser" {
   # If python3 isn't available we cannot run this check; skip rather
   # than fail. urllib.parse.urlparse rejects invalid percent escapes
-  # the same way Go's net/url does.
+  # the same way Go's net/url does. Also asserts the `path` query
+  # parameter decodes back to the strftime template Vector expects.
   command -v python3 >/dev/null 2>&1 || skip "python3 not available"
 
   run filelogs_build_sink_dsn myapp
@@ -164,10 +175,10 @@ setup() {
   run python3 - <<PY "$dsn"
 import sys, urllib.parse
 p = urllib.parse.urlparse(sys.argv[1])
-# Path must decode without error and contain the strftime template.
-decoded = urllib.parse.unquote(p.path, errors='strict')
-assert decoded.endswith('.log'), decoded
-assert '%Y-%m-%d' in decoded, decoded
+qs = urllib.parse.parse_qs(p.query, strict_parsing=True)
+path = qs.get('path', [''])[0]
+assert path.endswith('.log'), path
+assert '%Y-%m-%d' in path, path
 PY
   [ "$status" -eq 0 ]
 }

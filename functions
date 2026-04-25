@@ -200,10 +200,12 @@ filelogs_build_sink_dsn() {
   format=$(filelogs_get_value "$app" format)
   pattern=$(filelogs_rotation_pattern "$app")
   enc_pattern=$(filelogs_url_encode_pattern "$pattern")
-  # strftime tokens are URL-encoded so the DSN parses cleanly; Dokku
-  # decodes once and passes the strftime template to Vector. URL query
-  # holds the codec knob.
-  printf 'file://%s/%s/%s.log?encoding[codec]=%s' \
+  # Dokku's vector-sink helper reads the file path from the `path`
+  # query parameter, NOT from the URL path component. Putting the path
+  # in the URL produces a sink JSON without a `path` field, and Vector
+  # restart-loops. Strftime tokens are URL-encoded so the DSN parses
+  # cleanly; Dokku decodes once and Vector receives the raw template.
+  printf 'file:///?path=%s/%s/%s.log&encoding[codec]=%s' \
     "$FILELOGS_LOG_ROOT" "$app" "$enc_pattern" "$format"
 }
 
