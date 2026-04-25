@@ -25,10 +25,32 @@ cmd_enable() {
   local dsn
   dsn=$(filelogs_build_sink_dsn "$app")
 
+  if ! filelogs_validate_dsn "$dsn"; then
+    echo "FATAL: generated DSN failed to parse — refusing to send to Dokku" >&2
+    echo "       DSN: $dsn" >&2
+    exit 1
+  fi
+
   dokku logs:set "$app" vector-sink "$dsn"
 
   printf '1' > "$FILELOGS_CONFIG_ROOT/apps/$app/enabled"
   echo "-----> filelogs enabled for $app (sink: $dsn)"
+
+  # Restart Vector so the new sink is picked up. Honors
+  # FILELOGS_SKIP_VECTOR_RESTART for tests / advanced operators.
+  filelogs_vector_restart
+
+  # Verify the sink landed in vector.json with a populated path. If
+  # not, the operator likely needs to investigate Vector logs — we
+  # warn loudly rather than silently leaving a broken pipeline.
+  if [[ "${FILELOGS_SKIP_VECTOR_VERIFY:-}" != "true" ]]; then
+    if filelogs_vector_has_sink_for_app "$app"; then
+      echo "       sink registered in vector.json"
+    else
+      echo "WARN: $app sink missing or has no 'path' field in $(filelogs_vector_config_path)." >&2
+      echo "      Run 'dokku ${PLUGIN_COMMAND_PREFIX}:doctor $app' to diagnose." >&2
+    fi
+  fi
 }
 
 cmd_enable "$@"

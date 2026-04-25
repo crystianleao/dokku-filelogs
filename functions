@@ -55,7 +55,10 @@ filelogs_validate_value() {
       [[ "$val" =~ ^[0-9]+[KkMmGg]?$ ]] || { echo "$key must be bytes or N[K|M|G]" >&2; return 1; }
       ;;
     format)
-      [[ "$val" == "json" || "$val" == "text" ]] || { echo "format must be json|text" >&2; return 1; }
+      case "$val" in
+        json|text|compact) ;;
+        *) echo "format must be json|text|compact" >&2; return 1 ;;
+      esac
       ;;
     compress | auto-enable)
       [[ "$val" == "true" || "$val" == "false" ]] || { echo "$key must be true|false" >&2; return 1; }
@@ -186,6 +189,39 @@ filelogs_app_is_enabled() {
   [[ -f "$FILELOGS_CONFIG_ROOT/apps/$app/enabled" ]]
 }
 
+filelogs_validate_dsn() {
+  # Best-effort pre-flight: catch invalid percent escapes before they
+  # poison Dokku's vector.json. Mirrors what Go's net/url.Parse rejects:
+  # every `%` must be followed by exactly two hex digits. Returns 0 on
+  # success or when no parser is available (we don't gate enable on
+  # parsability if we can't check it).
+  local dsn="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$dsn" <<'PY'
+import sys, re, urllib.parse
+dsn = sys.argv[1]
+if re.search(r'%(?![0-9a-fA-F]{2})', dsn):
+    print('DSN contains invalid percent escape (bare %X must be %25X)', file=sys.stderr)
+    sys.exit(1)
+try:
+    urllib.parse.urlparse(dsn)
+except Exception as e:
+    print('DSN parse error: ' + str(e), file=sys.stderr)
+    sys.exit(1)
+PY
+    return $?
+  fi
+  if command -v perl >/dev/null 2>&1; then
+    perl -e '
+      my $dsn = $ARGV[0];
+      exit 1 if $dsn =~ /%(?![0-9a-fA-F]{2})/;
+      exit 0;
+    ' -- "$dsn"
+    return $?
+  fi
+  return 0
+}
+
 filelogs_url_encode_pattern() {
   # URL-encode `%` so strftime tokens (%Y, %m, %d, %H) survive Dokku's
   # url.Parse step. Bare "%Y" is rejected as an invalid percent escape;
@@ -196,17 +232,27 @@ filelogs_url_encode_pattern() {
 }
 
 filelogs_build_sink_dsn() {
-  local app="$1" format pattern enc_pattern
+  local app="$1" format pattern enc_pattern query
   format=$(filelogs_get_value "$app" format)
   pattern=$(filelogs_rotation_pattern "$app")
   enc_pattern=$(filelogs_url_encode_pattern "$pattern")
+  case "$format" in
+    compact)
+      # Compact JSON: keep `timestamp`, `message`, `container_name`;
+      # drop the docker_logs label envelope. Codec is implicitly json
+      # because `text` ignores only_fields.
+      query='encoding[codec]=json&encoding[only_fields][0]=timestamp&encoding[only_fields][1]=message&encoding[only_fields][2]=container_name'
+      ;;
+    *)
+      query="encoding[codec]=$format"
+      ;;
+  esac
   # Dokku's vector-sink helper reads the file path from the `path`
-  # query parameter, NOT from the URL path component. Putting the path
-  # in the URL produces a sink JSON without a `path` field, and Vector
-  # restart-loops. Strftime tokens are URL-encoded so the DSN parses
-  # cleanly; Dokku decodes once and Vector receives the raw template.
-  printf 'file:///?path=%s/%s/%s.log&encoding[codec]=%s' \
-    "$FILELOGS_LOG_ROOT" "$app" "$enc_pattern" "$format"
+  # query parameter, NOT from the URL path component. Strftime tokens
+  # are URL-encoded so the DSN parses cleanly; Dokku decodes once and
+  # Vector receives the raw template.
+  printf 'file:///?path=%s/%s/%s.log&%s' \
+    "$FILELOGS_LOG_ROOT" "$app" "$enc_pattern" "$query"
 }
 
 filelogs_mtime() {
@@ -422,6 +468,95 @@ filelogs_current_log_bytes() {
   local name
   name=$(filelogs_current_log_name "$app")
   filelogs_file_size "$FILELOGS_LOG_ROOT/$app/$name"
+}
+
+filelogs_vector_config_path() {
+  echo "${FILELOGS_VECTOR_CONFIG:-/var/lib/dokku/data/logs/vector.json}"
+}
+
+filelogs_vector_container_name() {
+  # Override via env for tests / non-default Vector setups.
+  if [[ -n "${FILELOGS_VECTOR_CONTAINER:-}" ]]; then
+    echo "$FILELOGS_VECTOR_CONTAINER"
+    return 0
+  fi
+  command -v docker >/dev/null 2>&1 || return 0
+  docker ps --format '{{.Names}}' 2>/dev/null \
+    | awk '/[Vv]ector/ {print; exit}'
+  return 0
+}
+
+filelogs_vector_status() {
+  # Emits: running | restarting | exited | created | paused | missing |
+  # docker-unavailable. Test hook: FILELOGS_FAKE_VECTOR_STATUS.
+  if [[ -n "${FILELOGS_FAKE_VECTOR_STATUS:-}" ]]; then
+    echo "$FILELOGS_FAKE_VECTOR_STATUS"
+    return 0
+  fi
+  command -v docker >/dev/null 2>&1 || { echo docker-unavailable; return 0; }
+  local name
+  name=$(filelogs_vector_container_name)
+  [[ -z "$name" ]] && { echo missing; return 0; }
+  local state
+  state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null) \
+    || { echo missing; return 0; }
+  echo "$state"
+}
+
+filelogs_vector_has_sink_for_app() {
+  # 0 if vector.json has a sink "docker-sink:<app>" with a non-empty
+  # `path` field. python3 preferred; falls back to a coarse awk pass.
+  local app="$1"
+  local cfg
+  cfg=$(filelogs_vector_config_path)
+  [[ -f "$cfg" ]] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$cfg" "$app" <<'PY'
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(2)
+sink = cfg.get('sinks', {}).get('docker-sink:' + sys.argv[2], {})
+sys.exit(0 if sink.get('path') else 1)
+PY
+    return $?
+  fi
+  awk -v key="docker-sink:$app" '
+    $0 ~ key { in_sink=1 }
+    in_sink && /"path"[[:space:]]*:[[:space:]]*"[^"]+"/ { found=1 }
+    in_sink && /^[[:space:]]*}[[:space:]]*,?[[:space:]]*$/ { in_sink=0 }
+    END { exit (found ? 0 : 1) }
+  ' "$cfg"
+}
+
+filelogs_vector_sink_path_for_app() {
+  # Print the configured `path` for app's sink, or empty. Always 0.
+  local app="$1"
+  local cfg
+  cfg=$(filelogs_vector_config_path)
+  [[ -f "$cfg" ]] || return 0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$cfg" "$app" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(0)
+sys.stdout.write(cfg.get('sinks', {}).get('docker-sink:' + sys.argv[2], {}).get('path', ''))
+PY
+  fi
+  return 0
+}
+
+filelogs_vector_restart() {
+  # Best-effort restart so a freshly-set sink is picked up. Idempotent;
+  # honors FILELOGS_SKIP_VECTOR_RESTART=true to keep tests fast.
+  [[ "${FILELOGS_SKIP_VECTOR_RESTART:-}" == "true" ]] && return 0
+  command -v dokku >/dev/null 2>&1 || return 0
+  dokku logs:vector-stop >/dev/null 2>&1 || true
+  dokku logs:vector-start >/dev/null 2>&1 || true
+  return 0
 }
 
 filelogs_downgrade_rotation() {

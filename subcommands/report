@@ -35,6 +35,16 @@ report_app() {
   current_human=$(filelogs_bytes_to_human "$current_bytes")
   current_cap=$(filelogs_get_value "$app" max-current-log-bytes)
 
+  local sink_path sink_status
+  sink_path=$(filelogs_vector_sink_path_for_app "$app")
+  if filelogs_vector_has_sink_for_app "$app"; then
+    sink_status="ok"
+  elif [[ -z "$sink_path" ]]; then
+    sink_status="missing"
+  else
+    sink_status="invalid"
+  fi
+
   cat <<EOF
 =====> $app filelogs information
        enabled:          $enabled
@@ -46,6 +56,7 @@ report_app() {
        format:           $format
        compress:         $compress
        rotation:         $(filelogs_get_value "$app" rotation)
+       vector sink:      $sink_status${sink_path:+ ($sink_path)}
 EOF
 }
 
@@ -58,6 +69,12 @@ report_global() {
   threshold=$(filelogs_get_value --global min-free-disk-percent)
   pressure="ok"
   (( free_pct < threshold )) && pressure="LOW"
+
+  local vstate vname vcfg
+  vstate=$(filelogs_vector_status)
+  vname=$(filelogs_vector_container_name)
+  vcfg=$(filelogs_vector_config_path)
+
   cat <<EOF
 =====> filelogs global report
        log root:                 $FILELOGS_LOG_ROOT
@@ -73,6 +90,8 @@ report_global() {
        rotation (default):       $(filelogs_get_value --global rotation)
        max-current-log-bytes:    $(filelogs_get_value --global max-current-log-bytes)
        pressure-auto-downgrade:  $(filelogs_get_value --global pressure-auto-downgrade)
+       vector container:         ${vstate}${vname:+ ($vname)}
+       vector config:            $vcfg
 EOF
 }
 

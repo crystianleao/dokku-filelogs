@@ -76,6 +76,16 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "validate_value: format text ok" {
+  run filelogs_validate_value format text
+  [ "$status" -eq 0 ]
+}
+
+@test "validate_value: format compact ok" {
+  run filelogs_validate_value format compact
+  [ "$status" -eq 0 ]
+}
+
 @test "validate_value: format invalid" {
   run filelogs_validate_value format xml
   [ "$status" -ne 0 ]
@@ -153,6 +163,22 @@ setup() {
   [[ "$output" = *"%25Y-%25m-%25d"* ]]
 }
 
+@test "build_sink_dsn: format compact emits only_fields" {
+  filelogs_set_value myapp format compact
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"encoding[codec]=json"* ]]
+  [[ "$output" = *"encoding[only_fields][0]=timestamp"* ]]
+  [[ "$output" = *"encoding[only_fields][1]=message"* ]]
+  [[ "$output" = *"encoding[only_fields][2]=container_name"* ]]
+}
+
+@test "build_sink_dsn: format json does not emit only_fields" {
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"only_fields"* ]]
+}
+
 @test "build_sink_dsn: hourly form has no bare %H either" {
   filelogs_set_value myapp rotation hourly
   run filelogs_build_sink_dsn myapp
@@ -181,6 +207,31 @@ assert path.endswith('.log'), path
 assert '%Y-%m-%d' in path, path
 PY
   [ "$status" -eq 0 ]
+}
+
+@test "validate_dsn: accepts a well-formed DSN" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  filelogs_validate_dsn "file:///?path=/tmp/x.log&encoding[codec]=json"
+}
+
+@test "validate_dsn: rejects bare percent escapes" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  ! filelogs_validate_dsn "file:///?path=/tmp/%Y.log&encoding[codec]=json"
+}
+
+@test "validate_dsn: accepts DSN built by build_sink_dsn" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  local dsn
+  dsn=$(filelogs_build_sink_dsn myapp)
+  filelogs_validate_dsn "$dsn"
+}
+
+@test "validate_dsn: accepts compact DSN built by build_sink_dsn" {
+  command -v python3 >/dev/null 2>&1 || skip "python3 not available"
+  filelogs_set_value myapp format compact
+  local dsn
+  dsn=$(filelogs_build_sink_dsn myapp)
+  filelogs_validate_dsn "$dsn"
 }
 
 @test "url_encode_pattern: leaves percent-free input untouched" {
@@ -371,6 +422,62 @@ PY
   filelogs_set_value myapp rotation hourly
   ! filelogs_downgrade_rotation myapp
   refute_dokku_called
+}
+
+@test "vector_status: honors FILELOGS_FAKE_VECTOR_STATUS" {
+  FILELOGS_FAKE_VECTOR_STATUS=running run filelogs_vector_status
+  [ "$output" = "running" ]
+  FILELOGS_FAKE_VECTOR_STATUS=restarting run filelogs_vector_status
+  [ "$output" = "restarting" ]
+}
+
+@test "vector_config_path: defaults under /var/lib/dokku, override via env" {
+  unset FILELOGS_VECTOR_CONFIG
+  run filelogs_vector_config_path
+  [[ "$output" = *"/var/lib/dokku/data/logs/vector.json" ]]
+  FILELOGS_VECTOR_CONFIG=/tmp/foo.json run filelogs_vector_config_path
+  [ "$output" = "/tmp/foo.json" ]
+}
+
+@test "vector_has_sink_for_app: true when path present" {
+  cat > "$BATS_TEST_TMPDIR/v.json" <<'J'
+{"sources":{},"sinks":{"docker-sink:myapp":{"type":"file","path":"/x.log","encoding":{"codec":"json"}}}}
+J
+  FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/v.json" filelogs_vector_has_sink_for_app myapp
+}
+
+@test "vector_has_sink_for_app: false when path absent" {
+  cat > "$BATS_TEST_TMPDIR/v.json" <<'J'
+{"sources":{},"sinks":{"docker-sink:myapp":{"type":"file","encoding":{"codec":"json"}}}}
+J
+  ! FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/v.json" filelogs_vector_has_sink_for_app myapp
+}
+
+@test "vector_has_sink_for_app: false when sink absent" {
+  cat > "$BATS_TEST_TMPDIR/v.json" <<'J'
+{"sources":{},"sinks":{}}
+J
+  ! FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/v.json" filelogs_vector_has_sink_for_app myapp
+}
+
+@test "vector_sink_path_for_app: emits configured path" {
+  cat > "$BATS_TEST_TMPDIR/v.json" <<'J'
+{"sources":{},"sinks":{"docker-sink:myapp":{"type":"file","path":"/var/log/x.log"}}}
+J
+  FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/v.json" run filelogs_vector_sink_path_for_app myapp
+  [ "$output" = "/var/log/x.log" ]
+}
+
+@test "vector_restart: skipped when FILELOGS_SKIP_VECTOR_RESTART=true" {
+  FILELOGS_SKIP_VECTOR_RESTART=true filelogs_vector_restart
+  refute_dokku_called
+}
+
+@test "vector_restart: calls vector-stop then vector-start" {
+  unset FILELOGS_SKIP_VECTOR_RESTART
+  filelogs_vector_restart
+  assert_dokku_called_with "logs:vector-stop"
+  assert_dokku_called_with "logs:vector-start"
 }
 
 @test "downgrade_rotation: switches daily->hourly and re-emits DSN" {

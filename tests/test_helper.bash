@@ -30,6 +30,11 @@ printf '%s\n' "$*" >> "$AWS_CALLS_LOG"
 STUB
   chmod +x "$DOKKU_STUB_DIR/aws"
 
+  # Skip Vector container side-effects in tests by default. Specific
+  # tests opt back in via `unset FILELOGS_SKIP_VECTOR_RESTART` etc.
+  export FILELOGS_SKIP_VECTOR_RESTART=true
+  export FILELOGS_SKIP_VECTOR_VERIFY=true
+
   # Redirect cron file to tmp so backup-schedule tests don't touch /etc.
   export FILELOGS_CRON_FILE="$BATS_TEST_TMPDIR/cron/dokku-filelogs-backup"
   export FILELOGS_DOKKU_BIN="/usr/bin/dokku"

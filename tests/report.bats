@@ -63,3 +63,34 @@ setup() { setup_plugin_env; }
   [[ "$output" = *"pressure-auto-downgrade"* ]]
   [[ "$output" = *"max-current-log-bytes"* ]]
 }
+
+@test "report: global shows vector container status + config path" {
+  FILELOGS_FAKE_VECTOR_STATUS=running run_subcommand report
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"vector container:"* ]]
+  [[ "$output" = *"running"* ]]
+  [[ "$output" = *"vector config:"* ]]
+}
+
+@test "report: per-app shows vector sink status ok when path present" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp" "$FILELOGS_LOG_ROOT/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  export FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/vector.json"
+  cat > "$FILELOGS_VECTOR_CONFIG" <<'J'
+{"sinks":{"docker-sink:myapp":{"type":"file","path":"/var/log/x.log"}}}
+J
+  run_subcommand report myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"vector sink:"*"ok"* ]]
+  [[ "$output" = *"/var/log/x.log"* ]]
+}
+
+@test "report: per-app shows vector sink missing when no sink" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp" "$FILELOGS_LOG_ROOT/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  export FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/vector.json"
+  echo '{"sinks":{}}' > "$FILELOGS_VECTOR_CONFIG"
+  run_subcommand report myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"vector sink:"*"missing"* ]]
+}

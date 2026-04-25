@@ -19,8 +19,9 @@ EOF
     cat <<EOF
     ${PLUGIN_COMMAND_PREFIX}:enable <app>                 Enable file logging for app
     ${PLUGIN_COMMAND_PREFIX}:disable <app>                Disable file logging for app
-    ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format, compress, auto-enable, min-free-disk-percent, rotation, backup-exclude, max-current-log-bytes, pressure-auto-downgrade)
+    ${PLUGIN_COMMAND_PREFIX}:set <app|--global> <k> <v>   Set config key (retention-days, max-app-bytes, max-total-bytes, format (json|text|compact), compress, auto-enable, min-free-disk-percent, rotation, backup-exclude, max-current-log-bytes, pressure-auto-downgrade)
     ${PLUGIN_COMMAND_PREFIX}:report [<app>]               Show status + disk usage
+    ${PLUGIN_COMMAND_PREFIX}:doctor [<app>]               Run health checks (vector, config, sinks, GC timer)
     ${PLUGIN_COMMAND_PREFIX}:gc                           Force a garbage-collection run
     ${PLUGIN_COMMAND_PREFIX}:tail <app> [--date YYYY-MM-DD] [--at YYYY-MM-DDTHH] [--lines N]  Tail log
     ${PLUGIN_COMMAND_PREFIX}:backup <app>|--all [--bucket <b>] [--prefix <p>]     Sync rotated logs to S3

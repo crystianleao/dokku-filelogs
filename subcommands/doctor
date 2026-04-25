@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -eo pipefail
+[[ $DOKKU_TRACE ]] && set -x
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=config
+source "$PLUGIN_ROOT/config"
+# shellcheck source=functions
+source "$PLUGIN_ROOT/functions"
+
+doctor_ok()   { printf '[OK]    %s\n' "$1"; }
+doctor_warn() { printf '[WARN]  %s\n' "$1"; warns=$((warns+1)); }
+doctor_fail() { printf '[FAIL]  %s\n' "$1"; errs=$((errs+1)); }
+
+doctor_check_vector() {
+  local vstate name
+  vstate=$(filelogs_vector_status)
+  name=$(filelogs_vector_container_name)
+  case "$vstate" in
+    running)
+      doctor_ok "vector container running (${name:-<unknown>})"
+      ;;
+    restarting)
+      doctor_fail "vector container restarting — config invalid. Inspect: docker logs ${name:-vector-vector-1}"
+      ;;
+    exited|created|paused|dead)
+      doctor_fail "vector container in state '$vstate' — run 'dokku logs:vector-start'"
+      ;;
+    missing)
+      doctor_warn "vector container not found. It will be created on first 'dokku ${PLUGIN_COMMAND_PREFIX}:enable'"
+      ;;
+    docker-unavailable)
+      doctor_warn "docker not on PATH — cannot inspect Vector"
+      ;;
+    *)
+      doctor_fail "vector container in unexpected state: $vstate"
+      ;;
+  esac
+}
+
+doctor_check_config() {
+  local cfg
+  cfg=$(filelogs_vector_config_path)
+  if [[ -f "$cfg" ]]; then
+    doctor_ok "vector config present ($cfg)"
+  else
+    doctor_warn "vector config not found ($cfg) — run 'dokku ${PLUGIN_COMMAND_PREFIX}:enable <app>'"
+  fi
+}
+
+doctor_check_app() {
+  local app="$1"
+  if filelogs_app_is_enabled "$app"; then
+    doctor_ok "$app is filelogs-enabled"
+  else
+    doctor_fail "$app is not enabled. Run 'dokku ${PLUGIN_COMMAND_PREFIX}:enable $app'"
+    return 0
+  fi
+  if filelogs_vector_has_sink_for_app "$app"; then
+    local p
+    p=$(filelogs_vector_sink_path_for_app "$app")
+    doctor_ok "$app sink registered in vector.json (path: ${p:-<unknown>})"
+  else
+    doctor_fail "$app sink missing 'path' in vector.json — re-run 'dokku ${PLUGIN_COMMAND_PREFIX}:enable $app'"
+  fi
+  local dir="$FILELOGS_LOG_ROOT/$app"
+  if [[ -d "$dir" ]]; then
+    doctor_ok "log dir present ($dir)"
+  else
+    doctor_warn "log dir missing ($dir) — created on first write"
+  fi
+}
+
+doctor_check_gc_timer() {
+  # Test hook precedes systemctl so unit tests work on macOS dev boxes
+  # where systemctl is absent.
+  if [[ -n "${FILELOGS_FAKE_TIMER_ACTIVE:-}" ]]; then
+    case "$FILELOGS_FAKE_TIMER_ACTIVE" in
+      true)  doctor_ok "GC timer active (dokku-filelogs.timer)" ;;
+      *)     doctor_warn "GC timer not active — 'sudo systemctl enable --now dokku-filelogs.timer'" ;;
+    esac
+    return 0
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    doctor_warn "systemctl not available — schedule 'dokku ${PLUGIN_COMMAND_PREFIX}:gc' manually"
+    return 0
+  fi
+  if systemctl is-active --quiet dokku-filelogs.timer 2>/dev/null; then
+    doctor_ok "GC timer active (dokku-filelogs.timer)"
+  else
+    doctor_warn "GC timer not active — 'sudo systemctl enable --now dokku-filelogs.timer'"
+  fi
+}
+
+cmd_doctor() {
+  local cmd="${PLUGIN_COMMAND_PREFIX}:doctor"
+  [[ "${1:-}" == "$cmd" ]] && shift
+  local app="${1:-}"
+  local warns=0 errs=0
+
+  if [[ -n "$app" ]]; then
+    echo "=====> dokku ${PLUGIN_COMMAND_PREFIX} doctor ($app)"
+  else
+    echo "=====> dokku ${PLUGIN_COMMAND_PREFIX} doctor"
+  fi
+
+  doctor_check_vector
+  doctor_check_config
+  doctor_check_gc_timer
+  if [[ -n "$app" ]]; then
+    doctor_check_app "$app"
+  fi
+
+  echo
+  echo "Summary: $errs failures, $warns warnings"
+  if (( errs > 0 )); then
+    return 1
+  fi
+}
+
+cmd_doctor "$@"

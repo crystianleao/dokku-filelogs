@@ -47,3 +47,33 @@ setup() { setup_plugin_env; }
   ! grep -E '%[YmdH][^0-9a-fA-F]' "$DOKKU_CALLS_LOG"
   grep -F '%25Y-%25m-%25d.log' "$DOKKU_CALLS_LOG"
 }
+
+@test "enable: restarts vector container after logs:set" {
+  unset FILELOGS_SKIP_VECTOR_RESTART
+  run_subcommand enable myapp
+  [ "$status" -eq 0 ]
+  assert_dokku_called_with "logs:vector-stop"
+  assert_dokku_called_with "logs:vector-start"
+}
+
+@test "enable: warns when sink is absent from vector.json" {
+  unset FILELOGS_SKIP_VECTOR_VERIFY
+  export FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/vector.json"
+  echo '{"sinks":{}}' > "$FILELOGS_VECTOR_CONFIG"
+  run_subcommand enable myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"WARN"* ]]
+  [[ "$output" = *"vector.json"* ]]
+}
+
+@test "enable: confirms sink registration when path present" {
+  unset FILELOGS_SKIP_VECTOR_VERIFY
+  export FILELOGS_VECTOR_CONFIG="$BATS_TEST_TMPDIR/vector.json"
+  cat > "$FILELOGS_VECTOR_CONFIG" <<'J'
+{"sinks":{"docker-sink:myapp":{"type":"file","path":"/var/log/dokku/apps/myapp/%Y-%m-%d.log"}}}
+J
+  run_subcommand enable myapp
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"sink registered in vector.json"* ]]
+  [[ "$output" != *"WARN"* ]]
+}

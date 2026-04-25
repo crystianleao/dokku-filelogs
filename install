@@ -35,4 +35,17 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /etc/systemd/system ]]; then
   systemctl enable --now dokku-filelogs.timer || true
 fi
 
+# Surface common preconditions once at install time so the operator
+# learns of missing dependencies before the first enable.
+if ! command -v docker >/dev/null 2>&1; then
+  echo "       NOTE: docker not on PATH; the Vector container won't start. Install Docker before running '${PLUGIN_COMMAND_PREFIX}:enable'."
+fi
+if ! command -v dokku >/dev/null 2>&1; then
+  echo "       NOTE: dokku not on PATH; the plugin will not be able to set the Vector sink."
+fi
+if ! command -v python3 >/dev/null 2>&1 && ! command -v perl >/dev/null 2>&1; then
+  echo "       NOTE: neither python3 nor perl available — DSN pre-flight validation will be skipped."
+fi
+
 echo "-----> filelogs installed (log root: $FILELOGS_LOG_ROOT)"
+echo "       Run 'dokku ${PLUGIN_COMMAND_PREFIX}:doctor' anytime to verify health."

@@ -43,6 +43,15 @@ setup() { setup_plugin_env; }
   [ "$status" -ne 0 ]
 }
 
+@test "set: format compact valid + re-applies sink" {
+  mkdir -p "$FILELOGS_CONFIG_ROOT/apps/myapp"
+  echo 1 > "$FILELOGS_CONFIG_ROOT/apps/myapp/enabled"
+  run_subcommand set myapp format compact
+  [ "$status" -eq 0 ]
+  [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/format")" = "compact" ]
+  assert_dokku_called_with "encoding[only_fields][0]=timestamp"
+}
+
 @test "set: --global min-free-disk-percent valid" {
   run_subcommand set --global min-free-disk-percent 15
   [ "$status" -eq 0 ]
