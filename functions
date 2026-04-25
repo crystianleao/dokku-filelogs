@@ -278,7 +278,12 @@ filelogs_build_sink_dsn() {
       # Compact JSON: keep `timestamp`, `message`, `container_name`;
       # drop the docker_logs label envelope. Codec is implicitly json
       # because `text` ignores only_fields.
-      query='encoding[codec]=json&encoding[only_fields][0]=timestamp&encoding[only_fields][1]=message&encoding[only_fields][2]=container_name'
+      #
+      # IMPORTANT: Dokku parses the DSN query via the qson library
+      # (joeshaw/qson). It treats `key[]=v` as array push. Indexed
+      # `key[0]=v` produces a JSON *map* like {"0":"v"} which Vector
+      # rejects with "invalid type: map, expected a sequence".
+      query='encoding[codec]=json&encoding[only_fields][]=timestamp&encoding[only_fields][]=message&encoding[only_fields][]=container_name'
       ;;
     *)
       query="encoding[codec]=$format"

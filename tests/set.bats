@@ -49,7 +49,7 @@ setup() { setup_plugin_env; }
   run_subcommand set myapp format compact
   [ "$status" -eq 0 ]
   [ "$(cat "$FILELOGS_CONFIG_ROOT/apps/myapp/format")" = "compact" ]
-  assert_dokku_called_with "encoding[only_fields][0]=timestamp"
+  assert_dokku_called_with "encoding[only_fields][]=timestamp"
 }
 
 @test "set: --global min-free-disk-percent valid" {

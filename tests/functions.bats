@@ -128,7 +128,7 @@ setup() {
   # field out of the box. The DSN therefore includes only_fields.
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
-  [[ "$output" = "file:///?path=$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log&encoding[codec]=json&encoding[only_fields][0]=timestamp&encoding[only_fields][1]=message&encoding[only_fields][2]=container_name" ]]
+  [[ "$output" = "file:///?path=$FILELOGS_LOG_ROOT/myapp/%25Y-%25m-%25d.log&encoding[codec]=json&encoding[only_fields][]=timestamp&encoding[only_fields][]=message&encoding[only_fields][]=container_name" ]]
 }
 
 @test "build_sink_dsn: explicit format json drops only_fields" {
@@ -178,9 +178,25 @@ setup() {
   run filelogs_build_sink_dsn myapp
   [ "$status" -eq 0 ]
   [[ "$output" = *"encoding[codec]=json"* ]]
-  [[ "$output" = *"encoding[only_fields][0]=timestamp"* ]]
-  [[ "$output" = *"encoding[only_fields][1]=message"* ]]
-  [[ "$output" = *"encoding[only_fields][2]=container_name"* ]]
+  [[ "$output" = *"encoding[only_fields][]=timestamp"* ]]
+  [[ "$output" = *"encoding[only_fields][]=message"* ]]
+  [[ "$output" = *"encoding[only_fields][]=container_name"* ]]
+}
+
+@test "build_sink_dsn: compact uses qson array syntax not indexed map" {
+  # Regression: Dokku parses the DSN via the qson library. Indexed
+  # brackets like `key[0]=v` produce a map {"0":"v"} and Vector
+  # rejects it ("invalid type: map, expected a sequence"). Empty
+  # brackets `key[]=v` produce a proper array.
+  filelogs_set_value myapp format compact
+  run filelogs_build_sink_dsn myapp
+  [ "$status" -eq 0 ]
+  local count
+  count=$(echo "$output" | grep -o 'encoding\[only_fields\]\[\]' | wc -l | tr -d ' ')
+  [ "$count" = "3" ]
+  [[ "$output" != *"only_fields][0]"* ]]
+  [[ "$output" != *"only_fields][1]"* ]]
+  [[ "$output" != *"only_fields][2]"* ]]
 }
 
 @test "build_sink_dsn: format text drops only_fields" {
