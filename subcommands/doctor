@@ -86,9 +86,9 @@ doctor_check_backup() {
     doctor_fail "backup configured but docker not on PATH (required to run AWS CLI)"
   elif "$FILELOGS_DOCKER_BIN" image inspect "$FILELOGS_AWS_IMAGE" >/dev/null 2>&1; then
     doctor_ok "backup image present ($FILELOGS_AWS_IMAGE)"
-  else
-    doctor_warn "backup image $FILELOGS_AWS_IMAGE not pulled — first backup will pull it on demand"
   fi
+  # Image not pulled is intentionally not surfaced — Docker lazy-pulls
+  # on first run, which is normal behavior, not an issue.
 
   if [[ "$has_cron" = "yes" && "$has_creds" = "no" ]]; then
     doctor_fail "backup cron scheduled at $FILELOGS_CRON_FILE but no credentials — run '${PLUGIN_COMMAND_PREFIX}:backup-auth'"
