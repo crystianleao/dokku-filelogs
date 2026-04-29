@@ -154,6 +154,19 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
 - `backup` uses `aws s3 sync` with `--exclude "*" --include "*.log.gz"`,
   so the currently-open `.log` (mutable, being written by Vector) is
   never uploaded mid-write. Only rotated files reach S3.
+- **The AWS CLI runs inside a container, never on the host.** This
+  mirrors `dokku-postgres`'s `s3backup` approach: the host only needs
+  Docker (which Dokku already requires), and we don't ship a hidden
+  apt/pip dependency. Image is `$FILELOGS_AWS_IMAGE`
+  (default `amazon/aws-cli:2.17.0`, override via env). `install`
+  pre-pulls it best-effort; missing image triggers a lazy pull on
+  first backup. `doctor` checks both Docker presence and image
+  presence whenever credentials or a backup cron exist.
+- Credentials are passed to the container via `docker --env-file`,
+  not argv. Secrets must never appear in `ps`, `bash history`, or
+  systemd journals — the env-file is `0600` and lives only on disk.
+- The log dir is bind-mounted **read-only** at `/data` inside the
+  container, so a compromised AWS CLI image cannot mutate logs.
 - Sync is idempotent: re-running the same `backup` call is a no-op if
   nothing changed on disk. `aws s3 sync` handles dedup via size/etag.
 - Scheduling writes a plain cron file to `$FILELOGS_CRON_FILE`
@@ -165,8 +178,14 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
   by retention/cap regardless of backup status. Users who need
   guaranteed archival should schedule backup more frequently than
   retention (e.g., backup daily, retention=14d).
-- Tests stub the `aws` binary on PATH like the `dokku` stub. See
-  `test_helper.bash:assert_aws_called_with`.
+- Tests stub `docker` on PATH (the same stub mechanism as `dokku`).
+  See `test_helper.bash:assert_docker_called_with` /
+  `refute_docker_called_with`. The stub captures full argv to
+  `$DOCKER_CALLS_LOG` and exits 0 — sufficient because backup
+  assertions only verify the invocation shape (env-file path, bind
+  mount, image, `s3 sync` args). For test isolation prefer
+  `docker_sync_calls` over the raw log when filtering out incidental
+  `image inspect` traffic from doctor/install.
 
 ### Return-0 invariant for getter helpers
 

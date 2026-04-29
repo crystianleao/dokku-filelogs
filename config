@@ -25,3 +25,12 @@ export FILELOGS_GLOBAL_ONLY_KEYS="max-total-bytes auto-enable min-free-disk-perc
 # Path where backup-schedule writes a cron file. Overridable for tests.
 export FILELOGS_CRON_FILE="${FILELOGS_CRON_FILE:-/etc/cron.d/dokku-filelogs-backup}"
 export FILELOGS_DOKKU_BIN="${FILELOGS_DOKKU_BIN:-/usr/bin/dokku}"
+
+# Backup runs the AWS CLI inside this container image so the host does not
+# need awscli installed (mirrors dokku-postgres' s3backup approach). Override
+# to pin or air-gap-mirror.
+export FILELOGS_AWS_IMAGE="${FILELOGS_AWS_IMAGE:-amazon/aws-cli:2.17.0}"
+
+# Test hook: tests stub `docker` on PATH and need to assert the argv we'd
+# have passed. Override to a different binary name (e.g. "docker-stub").
+export FILELOGS_DOCKER_BIN="${FILELOGS_DOCKER_BIN:-docker}"

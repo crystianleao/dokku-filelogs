@@ -69,17 +69,34 @@ setup() {
   [[ "$output" = *"no bucket"* ]]
 }
 
-@test "backup: single app invokes aws s3 sync with correct args" {
+@test "backup: single app invokes aws s3 sync inside container with correct args" {
   run_subcommand backup-auth k s us-east-1
   mkdir -p "$FILELOGS_LOG_ROOT/myapp"
 
   run_subcommand backup myapp --bucket my-bucket
   [ "$status" -eq 0 ]
 
-  assert_aws_called_with "s3 sync"
-  assert_aws_called_with "$FILELOGS_LOG_ROOT/myapp/"
-  assert_aws_called_with "s3://my-bucket/myapp/"
-  assert_aws_called_with "--include *.log.gz"
+  # Container plumbing: ephemeral, env-file with creds, read-only bind mount, AWS CLI image.
+  assert_docker_called_with "container run --rm"
+  assert_docker_called_with "--env-file $FILELOGS_CONFIG_ROOT/backup/credentials"
+  assert_docker_called_with "-v $FILELOGS_LOG_ROOT/myapp:/data:ro"
+  assert_docker_called_with "$FILELOGS_AWS_IMAGE"
+
+  # Sync arguments: container-internal /data path, S3 destination, log.gz filter.
+  assert_docker_called_with "s3 sync /data s3://my-bucket/myapp/"
+  assert_docker_called_with "--exclude * --include *.log.gz"
+}
+
+@test "backup: secrets never appear in docker argv (passed via --env-file)" {
+  run_subcommand backup-auth AKIATEST topsecretvalue us-east-1
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+
+  run_subcommand backup myapp --bucket b
+  [ "$status" -eq 0 ]
+
+  # The credentials must be referenced by file path only — never inlined.
+  refute_docker_called_with "AKIATEST"
+  refute_docker_called_with "topsecretvalue"
 }
 
 @test "backup: prefix is applied to S3 destination" {
@@ -88,7 +105,7 @@ setup() {
 
   run_subcommand backup myapp --bucket b --prefix archives
   [ "$status" -eq 0 ]
-  assert_aws_called_with "s3://b/archives/myapp/"
+  assert_docker_called_with "s3://b/archives/myapp/"
 }
 
 @test "backup: custom endpoint passed through" {
@@ -97,7 +114,7 @@ setup() {
 
   run_subcommand backup myapp --bucket b
   [ "$status" -eq 0 ]
-  assert_aws_called_with "--endpoint-url https://s3.my-host.example.com"
+  assert_docker_called_with "--endpoint-url https://s3.my-host.example.com"
 }
 
 @test "backup: --all iterates every app dir" {
@@ -106,8 +123,8 @@ setup() {
 
   run_subcommand backup --all --bucket B
   [ "$status" -eq 0 ]
-  assert_aws_called_with "s3://B/a/"
-  assert_aws_called_with "s3://B/b/"
+  assert_docker_called_with "s3://B/a/"
+  assert_docker_called_with "s3://B/b/"
 }
 
 @test "backup: --all skips apps with backup-exclude=true" {
@@ -117,22 +134,60 @@ setup() {
 
   run_subcommand backup --all --bucket B
   [ "$status" -eq 0 ]
-  assert_aws_called_with "s3://B/keep/"
-  if grep -qF "s3://B/skip/" "$AWS_CALLS_LOG"; then
-    echo "skip app should have been excluded"
-    cat "$AWS_CALLS_LOG"
-    return 1
-  fi
+  assert_docker_called_with "s3://B/keep/"
+  refute_docker_called_with "s3://B/skip/"
 }
 
-@test "backup: records last-run timestamp" {
+@test "backup: success writes last-attempt + last-success, no last-error" {
   run_subcommand backup-auth k s
   mkdir -p "$FILELOGS_LOG_ROOT/myapp"
 
   run_subcommand backup myapp --bucket b
   [ "$status" -eq 0 ]
-  [ -f "$FILELOGS_CONFIG_ROOT/backup/last-run" ]
-  grep -qE "^[0-9]+$" "$FILELOGS_CONFIG_ROOT/backup/last-run"
+
+  local dir="$FILELOGS_CONFIG_ROOT/backup"
+  [ -f "$dir/last-attempt" ]
+  [ -f "$dir/last-success" ]
+  [ ! -f "$dir/last-error" ]
+  grep -qE "^[0-9]+$" "$dir/last-attempt"
+  grep -qE "^[0-9]+$" "$dir/last-success"
+}
+
+@test "backup: failure writes last-attempt + last-error, no last-success" {
+  run_subcommand backup-auth k s
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+
+  # Force the docker stub to fail so sync_app returns non-zero.
+  cat > "$DOKKU_STUB_DIR/docker" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_CALLS_LOG"
+case "$1 $2" in
+  "container run") exit 7 ;;
+  *)               exit 0 ;;
+esac
+STUB
+  chmod +x "$DOKKU_STUB_DIR/docker"
+
+  run_subcommand backup myapp --bucket b
+  [ "$status" -ne 0 ]
+
+  local dir="$FILELOGS_CONFIG_ROOT/backup"
+  [ -f "$dir/last-attempt" ]
+  [ ! -f "$dir/last-success" ]
+  [ -f "$dir/last-error" ]
+  grep -q "1/1 apps failed" "$dir/last-error"
+}
+
+@test "backup: success after a prior error clears last-error" {
+  run_subcommand backup-auth k s
+  mkdir -p "$FILELOGS_LOG_ROOT/myapp"
+
+  local dir="$FILELOGS_CONFIG_ROOT/backup"
+  echo "stale error" > "$dir/last-error"
+
+  run_subcommand backup myapp --bucket b
+  [ "$status" -eq 0 ]
+  [ ! -f "$dir/last-error" ]
 }
 
 # --- backup-schedule -------------------------------------------------------

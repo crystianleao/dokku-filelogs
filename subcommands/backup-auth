@@ -43,7 +43,11 @@ EOF
     printf 'AWS_ACCESS_KEY_ID=%s\n'      "$key_id"
     printf 'AWS_SECRET_ACCESS_KEY=%s\n'  "$secret"
     printf 'AWS_DEFAULT_REGION=%s\n'     "$region"
-    printf 'FILELOGS_S3_ENDPOINT=%s\n'   "$endpoint"
+    # Skip empty endpoint: older Docker (<20.10) rejects KEY= with no
+    # value in --env-file, which would break every backup.
+    if [[ -n "$endpoint" ]]; then
+      printf 'FILELOGS_S3_ENDPOINT=%s\n' "$endpoint"
+    fi
   } > "$tmp"
   chmod 0600 "$tmp"
   mv "$tmp" "$dir/credentials"

@@ -418,8 +418,11 @@ filelogs_backup_auth_exists() {
 }
 
 filelogs_backup_check_deps() {
-  if ! command -v aws >/dev/null 2>&1; then
-    echo "aws CLI not found. Install it from https://aws.amazon.com/cli/ and retry." >&2
+  # We run the AWS CLI inside a container so the host does not need awscli.
+  # The only host requirement is Docker, which Dokku already mandates.
+  if ! command -v "$FILELOGS_DOCKER_BIN" >/dev/null 2>&1; then
+    echo "docker not found on PATH (required for filelogs:backup)." >&2
+    echo "Dokku itself requires Docker; install it before running backups." >&2
     return 1
   fi
 }
@@ -447,38 +450,49 @@ filelogs_list_backup_candidates() {
 
 filelogs_backup_sync_app() {
   # Uploads rotated files for a single app to S3 via `aws s3 sync`.
-  # Excludes everything, includes only *.log.gz — so the
-  # actively-written current-day/current-hour .log is never uploaded
-  # mid-write.
+  # Runs the AWS CLI inside a container (FILELOGS_AWS_IMAGE) — mirrors
+  # the dokku-postgres approach — so the host does not need awscli.
+  #
+  # Credentials are passed via `--env-file`, never argv, so secrets do
+  # not appear in `ps`. The log dir is bind-mounted read-only.
+  #
+  # `--exclude "*" --include "*.log.gz"` ensures the currently-open
+  # `.log` (mutable, being written by Vector) is never uploaded
+  # mid-write. Only rotated files reach S3.
   local app="$1" bucket="$2" prefix="$3"
-  local src="$FILELOGS_LOG_ROOT/$app/"
+  local src="$FILELOGS_LOG_ROOT/$app"
   [[ -d "$src" ]] || return 0
 
   local dest="s3://$bucket"
   [[ -n "$prefix" ]] && dest="$dest/$prefix"
   dest="$dest/$app/"
 
+  local cred_file
+  cred_file="$(filelogs_backup_dir)/credentials"
+  if [[ ! -f "$cred_file" ]]; then
+    echo "no credentials at $cred_file" >&2
+    return 1
+  fi
+
   local endpoint
   endpoint=$(filelogs_backup_cred_get FILELOGS_S3_ENDPOINT)
 
-  local cred_file
-  cred_file="$(filelogs_backup_dir)/credentials"
-
-  # Run aws in a subshell so the exported creds don't leak.
-  (
-    set -a
-    # shellcheck source=/dev/null
-    source "$cred_file"
-    set +a
-    if [[ -n "$endpoint" ]]; then
-      aws s3 sync "$src" "$dest" \
-        --exclude "*" --include "*.log.gz" \
-        --endpoint-url "$endpoint"
-    else
-      aws s3 sync "$src" "$dest" \
-        --exclude "*" --include "*.log.gz"
-    fi
+  # Local arrays inside a function body work fine in bash 3.2 (the known
+  # bug only affects arrays declared in a file sourced from a function).
+  local args
+  args=(
+    container run --rm
+    --env-file "$cred_file"
+    -v "$src:/data:ro"
+    "$FILELOGS_AWS_IMAGE"
+    s3 sync /data "$dest"
+    --exclude '*' --include '*.log.gz'
   )
+  if [[ -n "$endpoint" ]]; then
+    args+=(--endpoint-url "$endpoint")
+  fi
+
+  "$FILELOGS_DOCKER_BIN" "${args[@]}"
 }
 
 filelogs_list_apps() {

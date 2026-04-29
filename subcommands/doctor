@@ -71,6 +71,30 @@ doctor_check_app() {
   fi
 }
 
+doctor_check_backup() {
+  # Backup is opt-in (no creds, no schedule = nothing to check). When
+  # creds OR a cron file exists we treat backup as configured and verify
+  # its prerequisites.
+  local has_creds="no" has_cron="no"
+  filelogs_backup_auth_exists && has_creds="yes"
+  [[ -f "$FILELOGS_CRON_FILE" ]] && has_cron="yes"
+  if [[ "$has_creds" = "no" && "$has_cron" = "no" ]]; then
+    return 0
+  fi
+
+  if ! command -v "$FILELOGS_DOCKER_BIN" >/dev/null 2>&1; then
+    doctor_fail "backup configured but docker not on PATH (required to run AWS CLI)"
+  elif "$FILELOGS_DOCKER_BIN" image inspect "$FILELOGS_AWS_IMAGE" >/dev/null 2>&1; then
+    doctor_ok "backup image present ($FILELOGS_AWS_IMAGE)"
+  else
+    doctor_warn "backup image $FILELOGS_AWS_IMAGE not pulled — first backup will pull it on demand"
+  fi
+
+  if [[ "$has_cron" = "yes" && "$has_creds" = "no" ]]; then
+    doctor_fail "backup cron scheduled at $FILELOGS_CRON_FILE but no credentials — run '${PLUGIN_COMMAND_PREFIX}:backup-auth'"
+  fi
+}
+
 doctor_check_gc_timer() {
   # Test hook precedes systemctl so unit tests work on macOS dev boxes
   # where systemctl is absent.
@@ -107,6 +131,7 @@ cmd_doctor() {
   doctor_check_vector
   doctor_check_config
   doctor_check_gc_timer
+  doctor_check_backup
   if [[ -n "$app" ]]; then
     doctor_check_app "$app"
   fi

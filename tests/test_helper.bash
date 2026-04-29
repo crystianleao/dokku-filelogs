@@ -21,14 +21,21 @@ STUB
   chmod +x "$DOKKU_STUB_DIR/dokku"
   export PATH="$DOKKU_STUB_DIR:$PATH"
 
-  # Stub `aws` CLI for backup tests — echoes invocation to log.
-  export AWS_CALLS_LOG="$BATS_TEST_TMPDIR/aws-calls.log"
-  : > "$AWS_CALLS_LOG"
-  cat > "$DOKKU_STUB_DIR/aws" <<'STUB'
+  # Stub `docker` for backup tests — echoes invocation to log.
+  # filelogs:backup runs the AWS CLI inside a container, so we capture
+  # the full `docker container run ... amazon/aws-cli s3 sync ...` argv.
+  # Other Docker commands (image inspect, etc.) succeed silently — the
+  # stub returns 0 so doctor/install hooks behave as if Docker is healthy.
+  export DOCKER_CALLS_LOG="$BATS_TEST_TMPDIR/docker-calls.log"
+  : > "$DOCKER_CALLS_LOG"
+  cat > "$DOKKU_STUB_DIR/docker" <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$AWS_CALLS_LOG"
+printf '%s\n' "$*" >> "$DOCKER_CALLS_LOG"
+# `image inspect` callers (doctor, install) check via exit status: the
+# default 0 means "image present" which is convenient in tests.
+exit 0
 STUB
-  chmod +x "$DOKKU_STUB_DIR/aws"
+  chmod +x "$DOKKU_STUB_DIR/docker"
 
   # Skip Vector container side-effects in tests by default. Specific
   # tests opt back in via `unset FILELOGS_SKIP_VECTOR_RESTART` etc.
@@ -43,22 +50,31 @@ STUB
   unset DOKKU_TRACE
 }
 
-assert_aws_called_with() {
+assert_docker_called_with() {
   local needle="$1"
-  if ! grep -qF -- "$needle" "$AWS_CALLS_LOG"; then
-    echo "Expected aws call containing: $needle"
+  if ! grep -qF -- "$needle" "$DOCKER_CALLS_LOG"; then
+    echo "Expected docker call containing: $needle"
     echo "Actual calls:"
-    cat "$AWS_CALLS_LOG"
+    cat "$DOCKER_CALLS_LOG"
     return 1
   fi
 }
 
-refute_aws_called() {
-  if [[ -s "$AWS_CALLS_LOG" ]]; then
-    echo "Expected no aws calls, but got:"
-    cat "$AWS_CALLS_LOG"
+refute_docker_called_with() {
+  local needle="$1"
+  if grep -qF -- "$needle" "$DOCKER_CALLS_LOG"; then
+    echo "Expected no docker call containing: $needle"
+    echo "Actual calls:"
+    cat "$DOCKER_CALLS_LOG"
     return 1
   fi
+}
+
+# Returns only the lines that look like `container run ... s3 sync ...`
+# invocations — filters out incidental `image inspect` calls from doctor
+# / install / backup-report so backup-specific assertions are robust.
+docker_sync_calls() {
+  grep -F 'container run' "$DOCKER_CALLS_LOG" | grep -F 's3 sync' || true
 }
 
 source_plugin() {

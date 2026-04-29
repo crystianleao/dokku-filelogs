@@ -47,5 +47,17 @@ if ! command -v python3 >/dev/null 2>&1 && ! command -v perl >/dev/null 2>&1; th
   echo "       NOTE: neither python3 nor perl available — DSN pre-flight validation will be skipped."
 fi
 
+# Pre-pull the AWS CLI image used by filelogs:backup. Best-effort: missing
+# Docker, no network, or air-gapped envs just fall back to a lazy pull on
+# the first backup. Skipped if FILELOGS_SKIP_PREPULL=true (used by tests).
+if [[ "${FILELOGS_SKIP_PREPULL:-}" != "true" ]] && command -v docker >/dev/null 2>&1; then
+  if ! docker image inspect "$FILELOGS_AWS_IMAGE" >/dev/null 2>&1; then
+    echo "-----> pre-pulling backup image: $FILELOGS_AWS_IMAGE"
+    if ! docker pull "$FILELOGS_AWS_IMAGE" >/dev/null 2>&1; then
+      echo "       NOTE: failed to pre-pull $FILELOGS_AWS_IMAGE; will be lazy-pulled on first backup."
+    fi
+  fi
+fi
+
 echo "-----> filelogs installed (log root: $FILELOGS_LOG_ROOT)"
 echo "       Run 'dokku ${PLUGIN_COMMAND_PREFIX}:doctor' anytime to verify health."

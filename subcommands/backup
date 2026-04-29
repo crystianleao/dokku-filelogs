@@ -72,12 +72,26 @@ cmd_backup() {
     fi
   done
 
-  date -u +%s > "$(filelogs_backup_dir)/last-run"
+  # Three separate status fields so backup-report can distinguish:
+  # - last-attempt: every run, success or failure (cron heartbeat)
+  # - last-success: only when ALL apps in the batch synced (true archival progress)
+  # - last-error:   present only after a partial/total failure; cleared on next success
+  # This avoids the previous trap where last-run advanced on partial failures and
+  # masked apps that had been silently failing for days.
+  local now backup_dir
+  now=$(date -u +%s)
+  backup_dir="$(filelogs_backup_dir)"
+  echo "$now" > "$backup_dir/last-attempt"
 
   if (( failures > 0 )); then
+    printf '%s %d/%d apps failed\n' "$now" "$failures" "${#apps[@]}" \
+      > "$backup_dir/last-error"
     echo "filelogs: $failures app(s) failed to sync" >&2
     exit 1
   fi
+
+  echo "$now" > "$backup_dir/last-success"
+  rm -f "$backup_dir/last-error"
 
   echo "-----> backup complete (${#apps[@]} app(s))"
 }

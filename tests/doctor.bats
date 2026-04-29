@@ -109,3 +109,30 @@ JSON
   FILELOGS_FAKE_TIMER_ACTIVE=false run_subcommand doctor
   [[ "$output" = *"[WARN]"*"GC timer not active"* ]]
 }
+
+@test "doctor: backup unconfigured stays silent" {
+  export FILELOGS_FAKE_VECTOR_STATUS=running
+  : > "$FILELOGS_VECTOR_CONFIG"
+  run_subcommand doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"backup"* ]]
+}
+
+@test "doctor: backup configured + image pulled is OK" {
+  export FILELOGS_FAKE_VECTOR_STATUS=running
+  : > "$FILELOGS_VECTOR_CONFIG"
+  run_subcommand backup-auth k s
+  run_subcommand doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" = *"[OK]"*"backup image present"* ]]
+}
+
+@test "doctor: cron scheduled without credentials FAILs" {
+  export FILELOGS_FAKE_VECTOR_STATUS=running
+  : > "$FILELOGS_VECTOR_CONFIG"
+  mkdir -p "$(dirname "$FILELOGS_CRON_FILE")"
+  : > "$FILELOGS_CRON_FILE"
+  run_subcommand doctor
+  [ "$status" -ne 0 ]
+  [[ "$output" = *"[FAIL]"*"cron scheduled"*"credentials"* ]]
+}
