@@ -55,10 +55,18 @@ EOF
   [[ -n "$prefix" ]] && filelogs_backup_set prefix "$prefix"
   filelogs_backup_set schedule "$schedule"
 
-  local cron_dir cron_tmp
+  # /etc/cron.d on a Dokku host is root-only, but the plugin runs as the
+  # `dokku` user. Build the tmp file in a user-writeable location and
+  # then escalate via sudo only when the destination dir is not
+  # writeable (mirrors dokku-postgres' service_backup_schedule). Tests
+  # point FILELOGS_CRON_FILE at a tmp dir so the sudo branch is skipped.
+  local cron_dir cron_tmp tmp_dir
   cron_dir=$(dirname "$FILELOGS_CRON_FILE")
-  mkdir -p "$cron_dir"
-  cron_tmp=$(mktemp "$cron_dir/.dokku-filelogs-backup.XXXXXX")
+  mkdir -p "$cron_dir" 2>/dev/null || true
+
+  tmp_dir="$(filelogs_backup_dir)"
+  mkdir -p "$tmp_dir"
+  cron_tmp=$(mktemp "$tmp_dir/.cron.XXXXXX")
   {
     printf '# dokku-filelogs backup schedule — managed, do not edit\n'
     printf 'SHELL=/bin/bash\n'
@@ -71,7 +79,14 @@ EOF
       "${prefix:+ --prefix $prefix}"
   } > "$cron_tmp"
   chmod 0644 "$cron_tmp"
-  mv "$cron_tmp" "$FILELOGS_CRON_FILE"
+
+  if [[ -w "$cron_dir" ]]; then
+    mv "$cron_tmp" "$FILELOGS_CRON_FILE"
+  else
+    sudo /bin/mv "$cron_tmp" "$FILELOGS_CRON_FILE"
+    sudo /bin/chown root:root "$FILELOGS_CRON_FILE"
+    sudo /bin/chmod 0644 "$FILELOGS_CRON_FILE"
+  fi
 
   echo "-----> schedule written: $FILELOGS_CRON_FILE"
   echo "       cron:   $schedule"

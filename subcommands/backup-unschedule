@@ -10,7 +10,15 @@ source "$PLUGIN_ROOT/functions"
 
 cmd_backup_unschedule() {
   if [[ -f "$FILELOGS_CRON_FILE" ]]; then
-    rm -f "$FILELOGS_CRON_FILE"
+    # /etc/cron.d is root-only on Dokku hosts. Removing requires write
+    # access on the parent dir; escalate via sudo when needed.
+    local cron_dir
+    cron_dir=$(dirname "$FILELOGS_CRON_FILE")
+    if [[ -w "$cron_dir" ]]; then
+      rm -f "$FILELOGS_CRON_FILE"
+    else
+      sudo /bin/rm -f "$FILELOGS_CRON_FILE"
+    fi
     echo "-----> schedule removed: $FILELOGS_CRON_FILE"
   else
     echo "-----> no schedule to remove"
