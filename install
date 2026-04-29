@@ -59,5 +59,23 @@ if [[ "${FILELOGS_SKIP_PREPULL:-}" != "true" ]] && command -v docker >/dev/null 
   fi
 fi
 
+# Sudoers: the dokku user runs the plugin and must place a managed cron
+# file under /etc/cron.d (root-only). Mirror dokku-postgres' approach:
+# whitelist exactly the four commands we need (mv from a fixed tmp path,
+# rm, chown, chmod), no broader privileges. Skipped under
+# FILELOGS_SKIP_SUDOERS=true (tests).
+if [[ "${FILELOGS_SKIP_SUDOERS:-}" != "true" ]] && [[ -d /etc/sudoers.d ]]; then
+  _SUDOERS_FILE="/etc/sudoers.d/dokku-${PLUGIN_COMMAND_PREFIX}"
+  _CRON_FILE="/etc/cron.d/dokku-${PLUGIN_COMMAND_PREFIX}-backup"
+  _TMP_CRON_FILE="$FILELOGS_CONFIG_ROOT/backup/.TMP_CRON_FILE"
+  cat > "$_SUDOERS_FILE" <<EOL
+%dokku ALL=(ALL) NOPASSWD:/bin/mv ${_TMP_CRON_FILE} ${_CRON_FILE}
+%dokku ALL=(ALL) NOPASSWD:/bin/chown root\:root ${_CRON_FILE}
+%dokku ALL=(ALL) NOPASSWD:/bin/chmod 644 ${_CRON_FILE}
+%dokku ALL=(ALL) NOPASSWD:/bin/rm -f ${_CRON_FILE}
+EOL
+  chmod 0440 "$_SUDOERS_FILE"
+fi
+
 echo "-----> filelogs installed (log root: $FILELOGS_LOG_ROOT)"
 echo "       Run 'dokku ${PLUGIN_COMMAND_PREFIX}:doctor' anytime to verify health."

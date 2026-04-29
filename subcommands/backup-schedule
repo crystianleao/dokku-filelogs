@@ -56,17 +56,21 @@ EOF
   filelogs_backup_set schedule "$schedule"
 
   # /etc/cron.d on a Dokku host is root-only, but the plugin runs as the
-  # `dokku` user. Build the tmp file in a user-writeable location and
-  # then escalate via sudo only when the destination dir is not
-  # writeable (mirrors dokku-postgres' service_backup_schedule). Tests
-  # point FILELOGS_CRON_FILE at a tmp dir so the sudo branch is skipped.
+  # `dokku` user. Mirror dokku-postgres: build the file at a FIXED tmp
+  # path under the user-writeable backup config dir, then escalate via
+  # `sudo /bin/mv` whose exact argv is whitelisted in
+  # /etc/sudoers.d/dokku-filelogs (installed by the plugin). The fixed
+  # path matters — sudoers does string-match the argv, so a mktemp'd
+  # name would not be permitted. Tests point FILELOGS_CRON_FILE at a
+  # tmp dir, where the dir is user-writeable and the sudo branch is
+  # skipped.
   local cron_dir cron_tmp tmp_dir
   cron_dir=$(dirname "$FILELOGS_CRON_FILE")
   mkdir -p "$cron_dir" 2>/dev/null || true
 
   tmp_dir="$(filelogs_backup_dir)"
   mkdir -p "$tmp_dir"
-  cron_tmp=$(mktemp "$tmp_dir/.cron.XXXXXX")
+  cron_tmp="$tmp_dir/.TMP_CRON_FILE"
   {
     printf '# dokku-filelogs backup schedule — managed, do not edit\n'
     printf 'SHELL=/bin/bash\n'
@@ -85,7 +89,7 @@ EOF
   else
     sudo /bin/mv "$cron_tmp" "$FILELOGS_CRON_FILE"
     sudo /bin/chown root:root "$FILELOGS_CRON_FILE"
-    sudo /bin/chmod 0644 "$FILELOGS_CRON_FILE"
+    sudo /bin/chmod 644 "$FILELOGS_CRON_FILE"
   fi
 
   echo "-----> schedule written: $FILELOGS_CRON_FILE"

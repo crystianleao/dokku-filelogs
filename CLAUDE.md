@@ -172,6 +172,16 @@ Dev machine is macOS (bash 3.2, BSD find/stat/du). CI/prod is Linux
 - Scheduling writes a plain cron file to `$FILELOGS_CRON_FILE`
   (default `/etc/cron.d/dokku-filelogs-backup`, overridable for tests).
   The file runs `dokku filelogs:backup --all` as user `dokku`.
+- `/etc/cron.d` is root-only but the plugin runs as the `dokku` user.
+  Mirroring `dokku-postgres`, `install` writes
+  `/etc/sudoers.d/dokku-filelogs` whitelisting exactly four commands
+  (mv from a fixed tmp path, rm, chown, chmod) on the cron file —
+  nothing else. Dokku does **not** grant `NOPASSWD: ALL` to its user
+  by default; without this whitelist, `sudo` prompts for a password
+  and the schedule fails. The argv is matched **string-for-string**
+  by sudoers, so the tmp path must stay fixed
+  (`$FILELOGS_CONFIG_ROOT/backup/.TMP_CRON_FILE`) and `chmod` must use
+  `644` (not `0644`) — anything else falls outside the whitelist.
 - Per-app opt-out: `dokku filelogs:set <app> backup-exclude true`.
   `filelogs_list_backup_candidates` filters these out.
 - **Backup is best-effort, not required for retention.** The GC deletes

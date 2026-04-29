@@ -9,4 +9,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
 
+# Drop the sudoers whitelist installed for backup-schedule.
+rm -f /etc/sudoers.d/dokku-filelogs
+
 echo "-----> filelogs uninstalled (log files under /var/log/dokku/apps left intact)"
